@@ -1,0 +1,2 @@
+package = org.davidnardya.vocalcoach.interop.vcaudio
+headers = vcaudio.h
