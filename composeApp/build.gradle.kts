@@ -19,25 +19,11 @@ kotlin {
     iosArm64()
     iosSimulatorArm64()
 
-//    listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
-//        iosTarget.compilations.getByName("main") {
-//            cinterops {
-//                val vcaudio by creating {
-//                    definitionFile.set(layout.projectDirectory.file("nativeInterop/vcaudio/vcaudio.def"))
-//                    includeDirs(layout.projectDirectory.dir("nativeInterop/vcaudio"))
-//                }
-//            }
-//        }
-//    }
-
     cocoapods {
         version = "1.0.0"
         summary = "VocalCoach"
         homepage = "https://example.com"
         ios.deploymentTarget = "15.0"
-        pod("TensorFlowLiteTaskAudio") {
-            version = libs.versions.tensorflowLiteTaskIos.get()
-        }
         framework {
             baseName = "ComposeApp"
             isStatic = true
@@ -70,6 +56,16 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+        val iosArm64Main by getting {
+            dependencies {
+                implementation(project(":tfliteInterop"))
+            }
+        }
+        val iosSimulatorArm64Main by getting {
+            dependencies {
+                implementation(project(":tfliteInterop"))
+            }
         }
     }
 }
@@ -104,3 +100,44 @@ android {
 dependencies {
     debugImplementation(libs.compose.uiTooling)
 }
+
+/**
+ * [composeApp.podspec] vendores `build/cocoapods/framework/ComposeApp.framework`. Gradle often leaves a
+ * dummy framework there (placeholder only) until Xcode runs `syncFramework`. Mirror the linked framework
+ * here so Swift/Xcode see the real `ComposeApp.h` (e.g. `ComposeUIViewFactory`).
+ */
+// Sync must include the "ComposeApp.framework" segment in the copy; pointing `from` at the
+// .framework directory alone copies its *contents* into `into`, leaving the dummy bundle
+// (placeholder.h) in place — Swift then sees no Kotlin exports.
+tasks.register<Sync>("syncCocoapodsFrameworkIosSimulatorDebug") {
+    dependsOn("linkPodDebugFrameworkIosSimulatorArm64")
+    from(layout.buildDirectory.dir("bin/iosSimulatorArm64/podDebugFramework")) {
+        include("ComposeApp.framework/**")
+    }
+    into(layout.projectDirectory.dir("build/cocoapods/framework"))
+}
+tasks.register<Sync>("syncCocoapodsFrameworkIosSimulatorRelease") {
+    dependsOn("linkPodReleaseFrameworkIosSimulatorArm64")
+    from(layout.buildDirectory.dir("bin/iosSimulatorArm64/podReleaseFramework")) {
+        include("ComposeApp.framework/**")
+    }
+    into(layout.projectDirectory.dir("build/cocoapods/framework"))
+}
+tasks.register<Sync>("syncCocoapodsFrameworkIosDeviceDebug") {
+    dependsOn("linkPodDebugFrameworkIosArm64")
+    from(layout.buildDirectory.dir("bin/iosArm64/podDebugFramework")) {
+        include("ComposeApp.framework/**")
+    }
+    into(layout.projectDirectory.dir("build/cocoapods/framework"))
+}
+tasks.register<Sync>("syncCocoapodsFrameworkIosDeviceRelease") {
+    dependsOn("linkPodReleaseFrameworkIosArm64")
+    from(layout.buildDirectory.dir("bin/iosArm64/podReleaseFramework")) {
+        include("ComposeApp.framework/**")
+    }
+    into(layout.projectDirectory.dir("build/cocoapods/framework"))
+}
+tasks.named("linkPodDebugFrameworkIosSimulatorArm64") { finalizedBy("syncCocoapodsFrameworkIosSimulatorDebug") }
+tasks.named("linkPodReleaseFrameworkIosSimulatorArm64") { finalizedBy("syncCocoapodsFrameworkIosSimulatorRelease") }
+tasks.named("linkPodDebugFrameworkIosArm64") { finalizedBy("syncCocoapodsFrameworkIosDeviceDebug") }
+tasks.named("linkPodReleaseFrameworkIosArm64") { finalizedBy("syncCocoapodsFrameworkIosDeviceRelease") }

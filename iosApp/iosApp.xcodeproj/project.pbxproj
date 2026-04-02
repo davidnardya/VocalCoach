@@ -10,10 +10,21 @@
 		36AFB749D75BFBC0D7C6D64E /* Pods_iosApp.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5ED811DF46B55ECEBC2B0565 /* Pods_iosApp.framework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		7B3D1E9F2A4C8E605B7D391F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8A4E2F1C3D5B7098E6A4F2C1 /* Pods.xcodeproj */;
+			proxyType = 1;
+			remoteGlobalIDString = ED39C638569286489CD697A6C8964146;
+			remoteInfo = "Pods-iosApp";
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		357B57E5607B6AA6C8012BCC /* Pods-iosApp.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-iosApp.debug.xcconfig"; path = "Target Support Files/Pods-iosApp/Pods-iosApp.debug.xcconfig"; sourceTree = "<group>"; };
 		5B19BEF021A343FC61AEB083 /* Pods-iosApp.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-iosApp.release.xcconfig"; path = "Target Support Files/Pods-iosApp/Pods-iosApp.release.xcconfig"; sourceTree = "<group>"; };
 		5ED811DF46B55ECEBC2B0565 /* Pods_iosApp.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_iosApp.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A4E2F1C3D5B7098E6A4F2C1 /* Pods.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = Pods.xcodeproj; path = Pods/Pods.xcodeproj; sourceTree = "<group>"; };
 		D16E51661E912092BBB13A15 /* VocalCoach.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VocalCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -69,6 +80,7 @@
 			isa = PBXGroup;
 			children = (
 				FBD3D4069B69CC54A3AD4BB8 /* Configuration */,
+				8A4E2F1C3D5B7098E6A4F2C1 /* Pods.xcodeproj */,
 				DC9B64B4143E435D3BE2737A /* iosApp */,
 				2B8F6CD982421688B6696789 /* Products */,
 				B008C68B4784D1F56748FA5D /* Pods */,
@@ -90,8 +102,14 @@
 				357B57E5607B6AA6C8012BCC /* Pods-iosApp.debug.xcconfig */,
 				5B19BEF021A343FC61AEB083 /* Pods-iosApp.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
+			sourceTree = "<group>";
+		};
+		F111D71B2F7F095500A405C7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -105,11 +123,12 @@
 				0F15ADFAB777EFF01B0A4809 /* Sources */,
 				15F05618E71B035EF8D82AF6 /* Frameworks */,
 				19623B933767AC9838D76226 /* Resources */,
-				B81D6BF08D2CB243FCE265D1 /* [CP] Copy Pods Resources */,
+				2860FC0DBA476A462E23E6CA /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				6C2B0D8E1F3A5948372615E0 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DC9B64B4143E435D3BE2737A /* iosApp */,
@@ -146,6 +165,12 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2B8F6CD982421688B6696789 /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = F111D71B2F7F095500A405C7 /* Products */;
+					ProjectRef = 8A4E2F1C3D5B7098E6A4F2C1 /* Pods.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				845C10C038462EF9B4A19653 /* iosApp */,
@@ -164,7 +189,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		B81D6BF08D2CB243FCE265D1 /* [CP] Copy Pods Resources */ = {
+		2860FC0DBA476A462E23E6CA /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -214,6 +239,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		6C2B0D8E1F3A5948372615E0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Pods-iosApp";
+			targetProxy = 7B3D1E9F2A4C8E605B7D391F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		51ECF3A189760E5CA315DF3A /* Release */ = {
