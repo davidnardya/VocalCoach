@@ -1,0 +1,11 @@
+package org.davidnardya.vocalcoach.core.util
+
+import androidx.compose.runtime.Composable
+
+interface PermissionManager {
+    @Composable
+    fun AskForNotificationPermission(onResult: (Boolean) -> Unit)
+    suspend fun hasNotificationPermission(): Boolean
+}
+
+expect fun createPermissionManager(): PermissionManager

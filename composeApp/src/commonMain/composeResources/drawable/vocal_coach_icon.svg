@@ -1,0 +1,11 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1024" height="1024" rx="200" ry="200" fill="#2B2B2B" stroke="#FF6F00" stroke-width="15"/>
+
+    <path d="M200 400 L450 300 L450 700 L200 600 Z" fill="#FF8F00"/>
+
+    <path d="M480 512 L520 450 L560 550 L600 400 L640 600 L680 480 L720 540 L760 512" fill="none" stroke="white" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <text x="650" y="850" font-family="Arial, sans-serif" font-weight="bold" font-size="250" fill="white">1</text>
+
+    <path d="M850 680 L869 738 L930 738 L881 774 L899 832 L850 796 L801 832 L819 774 L770 738 L831 738 Z" fill="white"/>
+</svg>

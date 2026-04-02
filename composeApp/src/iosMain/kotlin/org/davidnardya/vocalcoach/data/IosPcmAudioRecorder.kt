@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(ExperimentalForeignApi::class)
 
 package org.davidnardya.vocalcoach.data
 
@@ -6,7 +6,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
-import org.davidnardya.vocalcoach.domain.AudioRecorder
+import org.davidnardya.vocalcoach.domain.repository.AudioRecorder
 import org.davidnardya.vocalcoach.interop.vcaudio.vc_audio_sample
 import platform.AVFAudio.AVAudioEngine
 import platform.AVFAudio.AVAudioFrameCount
@@ -88,8 +88,8 @@ class IosPcmAudioRecorder : AudioRecorder {
         engine = null
         eng?.inputNode?.removeTapOnBus(0u)
         eng?.stop()
-        while (sampleChannel.tryReceive().isSuccess) {
-        }
+//        while (sampleChannel.tryReceive().isSuccess) {
+//        }
         AVAudioSession.sharedInstance().setActive(false, null)
     }
 

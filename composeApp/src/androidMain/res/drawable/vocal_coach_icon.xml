@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1024dp"
+    android:height="1024dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- Background Square with rounded corners approximation -->
+    <path
+        android:fillColor="#2B2B2B"
+        android:strokeColor="#FF6F00"
+        android:strokeWidth="15"
+        android:pathData="M200,0 L824,0 A200,200 0,0 1 1024,200 L1024,824 A200,200 0,0 1 824,1024 L200,1024 A200,200 0,0 1 0,824 L0,200 A200,200 0,0 1 200,0 Z" />
+
+    <!-- Orange Shape -->
+    <path
+        android:fillColor="#FF8F00"
+        android:pathData="M200,400 L450,300 L450,700 L200,600 Z" />
+
+    <!-- Pulse Line -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="25"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M480,512 L520,450 L560,550 L600,400 L640,600 L680,480 L720,540 L760,512" />
+
+    <!-- Star Shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M850,680 L869,738 L930,738 L881,774 L899,832 L850,796 L801,832 L819,774 L770,738 L831,738 Z" />
+</vector>

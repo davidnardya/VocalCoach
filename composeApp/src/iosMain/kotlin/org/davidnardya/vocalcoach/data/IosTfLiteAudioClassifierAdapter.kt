@@ -12,9 +12,9 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.davidnardya.vocalcoach.domain.AudioClassifier
-import org.davidnardya.vocalcoach.domain.ClassificationSnapshot
-import org.davidnardya.vocalcoach.domain.LabelScore
+import org.davidnardya.vocalcoach.domain.models.ClassificationSnapshot
+import org.davidnardya.vocalcoach.domain.models.LabelScore
+import org.davidnardya.vocalcoach.domain.repository.AudioClassifier
 
 @OptIn(ExperimentalForeignApi::class)
 class IosTfLiteAudioClassifierAdapter : AudioClassifier {
