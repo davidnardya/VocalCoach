@@ -22,8 +22,11 @@ data class PlayerStats(
 
         fun withDayRollover(stats: PlayerStats, today: LocalDate): PlayerStats {
             val todayStr = today.toString()
-            val marker = stats.levelsGainedForDate ?: return stats
-            if (marker == todayStr) return stats
+            if (stats.levelsGainedForDate == null) {
+                // Anchor legacy/missing day key so midnight rollover can reset counts.
+                return stats.copy(levelsGainedForDate = todayStr)
+            }
+            if (stats.levelsGainedForDate == todayStr) return stats
             return stats.copy(levelsGainedToday = 0, levelsGainedForDate = todayStr)
         }
 

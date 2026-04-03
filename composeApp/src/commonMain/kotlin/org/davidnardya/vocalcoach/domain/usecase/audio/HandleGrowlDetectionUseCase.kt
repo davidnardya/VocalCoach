@@ -1,5 +1,7 @@
 package org.davidnardya.vocalcoach.domain.usecase.audio
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.todayIn
@@ -17,6 +19,7 @@ class HandleGrowlDetectionUseCase(
 ) {
     private var lastDetectionTime: Long = 0
     private val cooldownMs = 1500L
+    private val statsUpdateMutex = Mutex()
 
     suspend operator fun invoke(snapshot: ClassificationSnapshot) {
         if (!snapshot.topLabel.contains("Growl", ignoreCase = true) || snapshot.topScore <= 0.5f) {
@@ -33,39 +36,41 @@ class HandleGrowlDetectionUseCase(
 
         var celebration: LevelUpCelebration? = null
 
-        repository.updateStats { raw ->
-            val rolled = PlayerStats.withDayRollover(raw, today)
-            val levelsForMultiplier = rolled.levelsGainedToday
-            val points = calculatePointsUseCase.pointsForGrowl(levelsForMultiplier)
+        statsUpdateMutex.withLock {
+            repository.updateStats { raw ->
+                val rolled = PlayerStats.withDayRollover(raw, today)
+                val levelsForMultiplier = rolled.levelsGainedToday
+                val points = calculatePointsUseCase.pointsForGrowl(levelsForMultiplier)
 
-            var total = rolled.totalScore + points
-            val oldLevel = rolled.level
-            val newLevel = PlayerStats.levelFromTotalScore(total)
+                var total = rolled.totalScore + points
+                val oldLevel = rolled.level
+                val newLevel = PlayerStats.levelFromTotalScore(total)
 
-            if (newLevel <= oldLevel) {
-                return@updateStats rolled.copy(
-                    totalScore = total,
+                if (newLevel <= oldLevel) {
+                    return@updateStats rolled.copy(
+                        totalScore = total,
+                    )
+                }
+
+                val r = streakManagementUseCase.processLevelUpBranch(
+                    rolled = rolled,
+                    oldLevel = oldLevel,
+                    newLevel = newLevel,
+                    todayStr = todayStr,
+                    totalScoreAfterGrowl = total,
+                )
+
+                celebration = LevelUpCelebration(newLevel = newLevel, milestoneBonus = r.milestoneBonus)
+
+                rolled.copy(
+                    totalScore = r.totalScore,
+                    streakCount = r.streakCount,
+                    lastLevelUpDate = r.lastLevelUpDate,
+                    lastStreakIncrementDate = r.lastStreakIncrementDate,
+                    levelsGainedToday = r.levelsGainedToday,
+                    levelsGainedForDate = r.levelsGainedForDate,
                 )
             }
-
-            val r = streakManagementUseCase.processLevelUpBranch(
-                rolled = rolled,
-                oldLevel = oldLevel,
-                newLevel = newLevel,
-                todayStr = todayStr,
-                totalScoreAfterGrowl = total,
-            )
-
-            celebration = LevelUpCelebration(newLevel = newLevel, milestoneBonus = r.milestoneBonus)
-
-            rolled.copy(
-                totalScore = r.totalScore,
-                streakCount = r.streakCount,
-                lastLevelUpDate = r.lastLevelUpDate,
-                lastStreakIncrementDate = r.lastStreakIncrementDate,
-                levelsGainedToday = r.levelsGainedToday,
-                levelsGainedForDate = r.levelsGainedForDate,
-            )
         }
 
         celebration?.let { c ->

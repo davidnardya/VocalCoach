@@ -11,6 +11,7 @@ import org.davidnardya.vocalcoach.domain.usecase.audio.AudioClassificationUseCas
 import org.davidnardya.vocalcoach.domain.usecase.audio.HandleGrowlDetectionUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.HandleLevelUpUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.GetNotificationSettingsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.ResetScoreUseCase
@@ -23,6 +24,7 @@ expect fun createNotificationScheduler(): NotificationScheduler
 private val scoreRepository: ScoreRepository by lazy { ScoreRepositoryImpl() }
 private val notificationSettingsRepository: NotificationSettingsRepository by lazy { NotificationSettingsRepositoryImpl() }
 private val calculatePointsUseCase: CalculatePointsUseCase by lazy { CalculatePointsUseCase() }
+private val handleLevelUpUseCase: HandleLevelUpUseCase by lazy { HandleLevelUpUseCase() }
 
 fun createAudioClassificationUseCase(): AudioClassificationUseCase {
     return AudioClassificationUseCase(
@@ -34,8 +36,9 @@ fun createAudioClassificationUseCase(): AudioClassificationUseCase {
 fun createLevelTrackerUseCase(): LevelTrackerUseCase = LevelTrackerUseCase(scoreRepository)
 fun createScoreRepository(): ScoreRepository = scoreRepository
 fun createCalculatePointsUseCase(): CalculatePointsUseCase = calculatePointsUseCase
+fun createHandleLevelUpUseCase(): HandleLevelUpUseCase = handleLevelUpUseCase
 fun createStreakManagementUseCase(): StreakManagementUseCase =
-    StreakManagementUseCase(scoreRepository, isDebugStreakTest = true)
+    StreakManagementUseCase(scoreRepository, handleLevelUpUseCase, isDebugStreakTest = true)
 
 /** Must receive the same [StreakManagementUseCase] instance as [AudioClassificationViewModel] so milestone/level-up flows reach the UI. */
 fun createHandleGrowlDetectionUseCase(streakManagement: StreakManagementUseCase): HandleGrowlDetectionUseCase =

@@ -8,10 +8,13 @@ import kotlin.math.roundToLong
  */
 class CalculatePointsUseCase {
 
-    fun computeMultiplier(levelsGainedToday: Int): Double = when {
-        levelsGainedToday >= 10 -> 3.0
-        levelsGainedToday >= 2 -> 2.0
-        else -> 1.0
+    /** ×3 at 10+ levels today, ×2 at 2–9, ×1 otherwise. */
+    fun computeMultiplier(levelsGainedToday: Int): Double {
+        return when {
+            levelsGainedToday >= 10 -> 3.0
+            levelsGainedToday >= 2 -> 2.0
+            else -> 1.0
+        }
     }
 
     fun pointsForGrowl(levelsGainedTodayForMultiplier: Int): Long {

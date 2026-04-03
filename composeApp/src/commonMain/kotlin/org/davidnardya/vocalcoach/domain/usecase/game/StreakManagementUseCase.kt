@@ -18,6 +18,7 @@ import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
  */
 class StreakManagementUseCase(
     private val repository: ScoreRepository,
+    private val handleLevelUpUseCase: HandleLevelUpUseCase,
     /**
      * When true, allows streak 24→25 even if [PlayerStats.lastStreakIncrementDate] is already today
      * (bypasses once-per-day gating for milestone/UI testing). Set to `false` for production.
@@ -56,8 +57,14 @@ class StreakManagementUseCase(
         require(newLevel > oldLevel)
 
         var lastLevelUp = todayStr
-        var levelsToday = rolled.levelsGainedToday + 1
-        val levelsDay = rolled.levelsGainedForDate ?: todayStr
+        val deltaLevels = newLevel - oldLevel
+        val levelsState = handleLevelUpUseCase.nextLevelsGainedState(
+            rolled = rolled,
+            todayStr = todayStr,
+            deltaLevels = deltaLevels,
+        )
+        var levelsToday = levelsState.levelsGainedToday
+        val levelsDay = levelsState.levelsGainedForDate
 
         var streak = rolled.streakCount
         var lastStreakInc = rolled.lastStreakIncrementDate

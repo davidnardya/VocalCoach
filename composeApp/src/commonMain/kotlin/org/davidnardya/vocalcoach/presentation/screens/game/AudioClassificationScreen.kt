@@ -46,15 +46,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -288,16 +286,19 @@ private fun AudioClassificationScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (multHot) {
-                        val label = when {
-                            mult >= 3.0 -> "×3"
-                            else -> "×2"
+                        val multiplierLabel = when (mult) {
+                            3.0 -> "×3"
+                            2.0 -> "×2"
+                            else -> ""
                         }
-                        Text(
-                            text = "$label MULTIPLIER",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = BloodRed,
-                            fontWeight = FontWeight.Black,
-                        )
+                        if (multiplierLabel.isNotEmpty()) {
+                            Text(
+                                text = "$multiplierLabel MULTIPLIER",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = BloodRed,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                     Text(
                         text = "Streak ${ui.streakCount}",

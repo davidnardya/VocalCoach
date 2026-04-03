@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -84,12 +85,21 @@ class AudioClassificationViewModel(
         }
     }
 
+    /** Current score multiplier from [ScoreRepository.getPlayerStats] → [CalculatePointsUseCase.computeMultiplier]. */
+    val multiplier: StateFlow<Double> = repository.getPlayerStats()
+        .map { stats -> calculatePointsUseCase.computeMultiplier(stats.levelsGainedToday) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 1.0,
+        )
+
     val state: StateFlow<AudioClassificationUiState> = combine(
         _internalState,
         repository.getPlayerStats(),
         _levelUpCelebration,
-    ) { internal, stats, levelUpCelebration ->
-        val mult = calculatePointsUseCase.computeMultiplier(stats.levelsGainedToday)
+        multiplier,
+    ) { internal, stats, levelUpCelebration, mult ->
         val milestone = levelUpCelebration?.milestoneBonus
         AudioClassificationUiState(
             isRecording = internal.isRecording,
