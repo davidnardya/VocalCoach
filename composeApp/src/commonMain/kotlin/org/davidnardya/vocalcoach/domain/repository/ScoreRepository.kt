@@ -5,6 +5,8 @@ import org.davidnardya.vocalcoach.domain.models.PlayerStats
 
 interface ScoreRepository {
     fun getPlayerStats(): Flow<PlayerStats>
-    suspend fun incrementScore()
+
+    suspend fun updateStats(transform: (PlayerStats) -> PlayerStats)
+
     suspend fun resetScore()
 }

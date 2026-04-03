@@ -1,0 +1,23 @@
+PODS:
+  - composeApp (1.0.0)
+  - TensorFlowLiteTaskAudio (0.4.3)
+
+DEPENDENCIES:
+  - composeApp (from `../composeApp`)
+  - TensorFlowLiteTaskAudio (= 0.4.3)
+
+SPEC REPOS:
+  trunk:
+    - TensorFlowLiteTaskAudio
+
+EXTERNAL SOURCES:
+  composeApp:
+    :path: "../composeApp"
+
+SPEC CHECKSUMS:
+  composeApp: ac72b11aa8bcaebb9c61ea36cec68f7c1cb0223c
+  TensorFlowLiteTaskAudio: c712928d24d194fc6a461d7894aff29392eb0872
+
+PODFILE CHECKSUM: 8316db35b78685a87860e291a8db0dc55c95c692
+
+COCOAPODS: 1.16.2

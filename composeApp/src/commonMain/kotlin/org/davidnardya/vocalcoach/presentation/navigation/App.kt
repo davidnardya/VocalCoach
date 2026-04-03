@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -23,10 +22,11 @@ import org.davidnardya.vocalcoach.presentation.screens.game.rememberAudioClassif
 import org.davidnardya.vocalcoach.presentation.screens.settings.SettingsScreen
 import org.davidnardya.vocalcoach.presentation.screens.settings.SettingsViewModel
 import org.davidnardya.vocalcoach.presentation.screens.welcome.WelcomeScreen
+import org.davidnardya.vocalcoach.presentation.theme.BrutalMetalTheme
 
 @Composable
 fun App() {
-    MaterialTheme {
+    BrutalMetalTheme {
         val navController = rememberNavController()
         val permissionManager = remember { createPermissionManager() }
         
@@ -50,12 +50,13 @@ fun App() {
         ) {
             composable<WelcomeRoute> {
                 WelcomeScreen(
+                    permissionManager = permissionManager,
                     onStartGame = {
                         navController.navigate(GameRoute)
                     },
                     onNavigateToSettings = {
                         navController.navigate(SettingsRoute)
-                    }
+                    },
                 )
             }
             composable<GameRoute>(

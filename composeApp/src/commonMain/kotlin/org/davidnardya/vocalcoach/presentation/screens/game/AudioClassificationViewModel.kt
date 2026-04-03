@@ -2,6 +2,8 @@ package org.davidnardya.vocalcoach.presentation.screens.game
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -9,7 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -17,14 +18,25 @@ import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.audio.AudioClassificationUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.HandleGrowlDetectionUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.LevelUpCelebration
+import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
+import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
 
 data class AudioClassificationUiState(
     val isRecording: Boolean = false,
     val currentLabel: String = "—",
-    val totalScore: Int = 0,
+    val totalScore: Long = 0L,
     val currentLevel: Int = 1,
+    val levelsGainedToday: Int = 0,
+    val streakCount: Int = 24,
+    val scoreMultiplier: Double = 1.0,
     val message: String? = null,
-    val showExitConfirmation: Boolean = false
+    val showExitConfirmation: Boolean = false,
+    /** Active level-up overlay; cleared after celebration duration. */
+    val levelUpCelebration: LevelUpCelebration? = null,
+    /** True when [levelUpCelebration] includes a streak milestone (+20 at 25, 50, …). */
+    val isMilestoneLevelUp: Boolean = false,
 )
 
 class AudioClassificationViewModel(
@@ -32,40 +44,70 @@ class AudioClassificationViewModel(
     repository: ScoreRepository,
     levelTrackerUseCase: LevelTrackerUseCase,
     private val handleGrowlDetectionUseCase: HandleGrowlDetectionUseCase,
+    private val calculatePointsUseCase: CalculatePointsUseCase,
+    private val streakManagementUseCase: StreakManagementUseCase,
 ) : ViewModel() {
 
     private val _internalState = MutableStateFlow(
-        InternalState(isRecording = false, currentLabel = "—")
+        InternalState(isRecording = false, currentLabel = "—"),
     )
 
-    private val _levelUpEvents = MutableSharedFlow<Int>(extraBufferCapacity = 1)
-    val levelUpEvents = _levelUpEvents.asSharedFlow()
+    private val _levelUpCelebration = MutableStateFlow<LevelUpCelebration?>(null)
+    private var clearLevelUpOverlayJob: Job? = null
+
+    val milestoneBonusEvents get() = streakManagementUseCase.milestoneBonusEvents
+    val levelUpCelebrations get() = streakManagementUseCase.levelUpCelebrations
+
+    private val _penaltyEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val penaltyEvents = _penaltyEvents.asSharedFlow()
 
     init {
-        levelTrackerUseCase.levelUpEvents
-            .onEach { _levelUpEvents.emit(it) }
-            .launchIn(viewModelScope)
-        
         levelTrackerUseCase.monitorLevelUps()
             .launchIn(viewModelScope)
+
+        viewModelScope.launch {
+            when (val r = streakManagementUseCase.runStartupCheck()) {
+                is PenaltyResult.Applied -> _penaltyEvents.emit(r.message)
+                is PenaltyResult.None -> Unit
+            }
+        }
+
+        viewModelScope.launch {
+            streakManagementUseCase.levelUpCelebrations.collect { celebration ->
+                _levelUpCelebration.value = celebration
+                clearLevelUpOverlayJob?.cancel()
+                clearLevelUpOverlayJob = viewModelScope.launch {
+                    delay(1700)
+                    _levelUpCelebration.value = null
+                }
+            }
+        }
     }
 
     val state: StateFlow<AudioClassificationUiState> = combine(
         _internalState,
-        repository.getPlayerStats()
-    ) { internal, stats ->
+        repository.getPlayerStats(),
+        _levelUpCelebration,
+    ) { internal, stats, levelUpCelebration ->
+        val mult = calculatePointsUseCase.computeMultiplier(stats.levelsGainedToday)
+        val milestone = levelUpCelebration?.milestoneBonus
         AudioClassificationUiState(
             isRecording = internal.isRecording,
             currentLabel = internal.currentLabel,
             totalScore = stats.totalScore,
             currentLevel = stats.level,
+            levelsGainedToday = stats.levelsGainedToday,
+            streakCount = stats.streakCount,
+            scoreMultiplier = mult,
             message = internal.message,
-            showExitConfirmation = internal.showExitConfirmation
+            showExitConfirmation = internal.showExitConfirmation,
+            levelUpCelebration = levelUpCelebration,
+            isMilestoneLevelUp = milestone != null,
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = AudioClassificationUiState()
+        initialValue = AudioClassificationUiState(),
     )
 
     private var cachedModelBytes: ByteArray? = null
@@ -112,8 +154,6 @@ class AudioClassificationViewModel(
     fun onBackRequested() {
         if (_internalState.value.isRecording) {
             _internalState.update { it.copy(showExitConfirmation = true) }
-        } else {
-            // Screen should handle navigation
         }
     }
 
@@ -130,6 +170,6 @@ class AudioClassificationViewModel(
         val isRecording: Boolean,
         val currentLabel: String,
         val message: String? = null,
-        val showExitConfirmation: Boolean = false
+        val showExitConfirmation: Boolean = false,
     )
 }
