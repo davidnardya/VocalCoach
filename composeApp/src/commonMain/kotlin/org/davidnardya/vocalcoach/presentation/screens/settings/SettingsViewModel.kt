@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.davidnardya.vocalcoach.domain.models.NotificationSettings
+import org.davidnardya.vocalcoach.domain.models.PlayerStats
+import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.settings.GetNotificationSettingsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.ResetScoreUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.SaveSettingsUseCase
@@ -12,7 +14,8 @@ import org.davidnardya.vocalcoach.domain.usecase.settings.SaveSettingsUseCase
 class SettingsViewModel(
     private val getSettingsUseCase: GetNotificationSettingsUseCase,
     private val saveSettingsUseCase: SaveSettingsUseCase,
-    private val resetScoreUseCase: ResetScoreUseCase
+    private val resetScoreUseCase: ResetScoreUseCase,
+    private val scoreRepository: ScoreRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(NotificationSettings())
@@ -64,6 +67,12 @@ class SettingsViewModel(
         viewModelScope.launch {
             resetScoreUseCase()
             _events.emit(SettingsEvent.ShowSnackbar("Progress reset successfully"))
+        }
+    }
+
+    fun updateStatsManually(newStats: PlayerStats) {
+        viewModelScope.launch {
+            scoreRepository.writePlayerStats(newStats)
         }
     }
 }

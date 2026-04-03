@@ -6,5 +6,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VocalCoach needs the microphone to classify your vocal style in real time.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>VocalCoach uses speech recognition to verify vowel and word challenges in higher levels.</string>
 </dict>
 </plist>

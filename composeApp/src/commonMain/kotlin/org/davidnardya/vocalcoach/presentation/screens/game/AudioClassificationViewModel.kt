@@ -10,16 +10,20 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.davidnardya.vocalcoach.domain.models.VocalChallenge
 import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.audio.AudioClassificationUseCase
+import org.davidnardya.vocalcoach.domain.usecase.audio.GrowlUiFeedback
 import org.davidnardya.vocalcoach.domain.usecase.audio.HandleGrowlDetectionUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.ChallengeProvider
 import org.davidnardya.vocalcoach.domain.usecase.game.LevelUpCelebration
 import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
@@ -34,19 +38,22 @@ data class AudioClassificationUiState(
     val scoreMultiplier: Double = 1.0,
     val message: String? = null,
     val showExitConfirmation: Boolean = false,
-    /** Active level-up overlay; cleared after celebration duration. */
     val levelUpCelebration: LevelUpCelebration? = null,
-    /** True when [levelUpCelebration] includes a streak milestone (+20 at 25, 50, …). */
     val isMilestoneLevelUp: Boolean = false,
+    val currentChallenge: VocalChallenge? = null,
+    /** Last STT text (Era 2+) for calibration when level > 50. */
+    val aiHeardTranscription: String? = null,
+    val isAnalyzing: Boolean = false,
 )
 
 class AudioClassificationViewModel(
     private val audioUseCase: AudioClassificationUseCase,
-    repository: ScoreRepository,
+    private val repository: ScoreRepository,
     levelTrackerUseCase: LevelTrackerUseCase,
     private val handleGrowlDetectionUseCase: HandleGrowlDetectionUseCase,
     private val calculatePointsUseCase: CalculatePointsUseCase,
     private val streakManagementUseCase: StreakManagementUseCase,
+    private val challengeProvider: ChallengeProvider,
 ) : ViewModel() {
 
     private val _internalState = MutableStateFlow(
@@ -85,7 +92,6 @@ class AudioClassificationViewModel(
         }
     }
 
-    /** Current score multiplier from [ScoreRepository.getPlayerStats] → [CalculatePointsUseCase.computeMultiplier]. */
     val multiplier: StateFlow<Double> = repository.getPlayerStats()
         .map { stats -> calculatePointsUseCase.computeMultiplier(stats.levelsGainedToday) }
         .stateIn(
@@ -100,6 +106,7 @@ class AudioClassificationViewModel(
         _levelUpCelebration,
         multiplier,
     ) { internal, stats, levelUpCelebration, mult ->
+        val challenge = challengeProvider.getChallenge(stats.level, stats.currentChallengeIndex)
         val milestone = levelUpCelebration?.milestoneBonus
         AudioClassificationUiState(
             isRecording = internal.isRecording,
@@ -113,6 +120,9 @@ class AudioClassificationViewModel(
             showExitConfirmation = internal.showExitConfirmation,
             levelUpCelebration = levelUpCelebration,
             isMilestoneLevelUp = milestone != null,
+            currentChallenge = challenge,
+            aiHeardTranscription = internal.aiHeardTranscription,
+            isAnalyzing = internal.isAnalyzing,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -121,6 +131,7 @@ class AudioClassificationViewModel(
     )
 
     private var cachedModelBytes: ByteArray? = null
+    private var isProcessingGrowl = false
 
     fun onStartStopClicked(
         permissionGranted: Boolean,
@@ -132,21 +143,47 @@ class AudioClassificationViewModel(
         }
         if (_internalState.value.isRecording) {
             audioUseCase.stop()
-            _internalState.update { it.copy(isRecording = false, message = null) }
+            _internalState.update { it.copy(isRecording = false, message = null, isAnalyzing = false) }
             return
         }
         viewModelScope.launch {
             try {
                 val bytes = cachedModelBytes ?: modelLoader().also { cachedModelBytes = it }
                 _internalState.update {
-                    it.copy(currentLabel = "—", message = null)
+                    it.copy(currentLabel = "—", message = null, aiHeardTranscription = null, isAnalyzing = false)
                 }
                 audioUseCase.start(viewModelScope, bytes) { snap ->
                     _internalState.update { s ->
                         s.copy(currentLabel = snap.topLabel)
                     }
+                    
+                    // Only process if not already busy with a heavy transcription (Whisper)
+                    if (isProcessingGrowl) return@start
+                    
                     viewModelScope.launch {
-                        handleGrowlDetectionUseCase(snap)
+                        val currentStats = repository.getPlayerStats().first()
+                        
+                        // We set isAnalyzing only if we think a growl happened and we are in Era 2+
+                        val isLikelyGrowl = snap.topLabel.contains("Growl", ignoreCase = true) && snap.topScore >= 0.45f
+                        if (isLikelyGrowl && currentStats.level >= 51) {
+                            _internalState.update { it.copy(isAnalyzing = true) }
+                            isProcessingGrowl = true
+                        }
+
+                        val feedback: GrowlUiFeedback = handleGrowlDetectionUseCase(snap, currentStats)
+                        
+                        _internalState.update { prev ->
+                            prev.copy(
+                                message = when {
+                                    feedback.partialMessage != null -> feedback.partialMessage
+                                    feedback.scoredPoints -> null
+                                    else -> prev.message
+                                },
+                                aiHeardTranscription = feedback.aiHeard ?: prev.aiHeardTranscription,
+                                isAnalyzing = false
+                            )
+                        }
+                        isProcessingGrowl = false
                     }
                 }
                 _internalState.update { it.copy(isRecording = true, message = null) }
@@ -181,5 +218,7 @@ class AudioClassificationViewModel(
         val currentLabel: String,
         val message: String? = null,
         val showExitConfirmation: Boolean = false,
+        val aiHeardTranscription: String? = null,
+        val isAnalyzing: Boolean = false,
     )
 }

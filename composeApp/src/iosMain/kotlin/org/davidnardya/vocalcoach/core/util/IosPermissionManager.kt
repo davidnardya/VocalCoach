@@ -7,6 +7,8 @@ import platform.AVFAudio.AVAudioSession
 import platform.AVFAudio.AVAudioSessionRecordPermissionDenied
 import platform.AVFAudio.AVAudioSessionRecordPermissionGranted
 import platform.AVFAudio.AVAudioSessionRecordPermissionUndetermined
+import platform.Speech.SFSpeechRecognizer
+import platform.Speech.SFSpeechRecognizerAuthorizationStatus
 import platform.UserNotifications.UNAuthorizationOptionAlert
 import platform.UserNotifications.UNAuthorizationOptionBadge
 import platform.UserNotifications.UNAuthorizationOptionSound
@@ -60,6 +62,23 @@ class IosPermissionManager : PermissionManager {
             -> false
             else -> false
         }
+
+    override suspend fun hasSpeechRecognitionPermission(): Boolean =
+        SFSpeechRecognizer.authorizationStatus() ==
+            SFSpeechRecognizerAuthorizationStatus.SFSpeechRecognizerAuthorizationStatusAuthorized
+
+    @Composable
+    override fun AskForSpeechRecognitionPermission(onResult: (Boolean) -> Unit) {
+        LaunchedEffect(Unit) {
+            SFSpeechRecognizer.requestAuthorization { status ->
+                val ok =
+                    status == SFSpeechRecognizerAuthorizationStatus.SFSpeechRecognizerAuthorizationStatusAuthorized
+                dispatch_async(dispatch_get_main_queue()) {
+                    onResult(ok)
+                }
+            }
+        }
+    }
 }
 
 actual fun createPermissionManager(): PermissionManager = IosPermissionManager()

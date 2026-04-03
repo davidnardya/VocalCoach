@@ -8,5 +8,8 @@ interface ScoreRepository {
 
     suspend fun updateStats(transform: (PlayerStats) -> PlayerStats)
 
+    /** Bypasses merge/transform logic: overwrites persisted stats as-is (e.g. developer tools). */
+    suspend fun writePlayerStats(stats: PlayerStats)
+
     suspend fun resetScore()
 }

@@ -67,6 +67,7 @@ fun App() {
                 val viewModel = rememberAudioClassificationViewModel()
                 AudioClassificationRoute(
                     viewModel = viewModel,
+                    permissionManager = permissionManager,
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -75,7 +76,8 @@ fun App() {
                     SettingsViewModel(
                         createGetNotificationSettingsUseCase(),
                         createSaveSettingsUseCase(),
-                        createResetScoreUseCase()
+                        createResetScoreUseCase(),
+                        createScoreRepository(),
                     )
                 }
                 SettingsScreen(

@@ -38,7 +38,13 @@ class AudioClassificationUseCase(
                     val n = recorder.readMonoFrame(buffer)
                     if (n == frameLen) {
                         val snap = classifier.classifyMonoPcm16(buffer) ?: continue
-                        onUpdate(snap)
+                        
+                        // Convert ShortArray to FloatArray for validation/transcription
+                        val floatBuffer = FloatArray(buffer.size) { i -> 
+                            buffer[i].toFloat() / Short.MAX_VALUE.toFloat() 
+                        }
+                        
+                        onUpdate(snap.copy(audioBuffer = floatBuffer))
                     }
                 }
             } finally {

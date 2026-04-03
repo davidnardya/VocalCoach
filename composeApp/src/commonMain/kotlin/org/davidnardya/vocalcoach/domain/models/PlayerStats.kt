@@ -12,6 +12,9 @@ data class PlayerStats(
     val levelsGainedToday: Int,
     /** Which day [levelsGainedToday] refers to; reset at local midnight when this != today. */
     val levelsGainedForDate: String?,
+    val currentChallengeIndex: Int = 0,
+    /** Secret Debug Toggle: bypass content check for high-confidence growls. */
+    val debugDisableContentCheck: Boolean = false,
 ) {
     val level: Int
         get() = levelFromTotalScore(totalScore)
@@ -19,6 +22,10 @@ data class PlayerStats(
     companion object {
         fun levelFromTotalScore(totalScore: Long): Int =
             ((totalScore / 10L) + 1L).toInt()
+
+        /** Minimum total score that yields [level] under [levelFromTotalScore] (level ≥ 1). */
+        fun totalScoreForTargetLevel(level: Int): Long =
+            (level.coerceAtLeast(1) - 1).coerceAtLeast(0) * 10L
 
         fun withDayRollover(stats: PlayerStats, today: LocalDate): PlayerStats {
             val todayStr = today.toString()
@@ -37,6 +44,7 @@ data class PlayerStats(
             lastStreakIncrementDate = null,
             levelsGainedToday = 0,
             levelsGainedForDate = null,
+            currentChallengeIndex = 0,
         )
     }
 }

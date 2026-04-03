@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -62,8 +65,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import org.davidnardya.vocalcoach.core.util.PermissionManager
 import org.davidnardya.vocalcoach.core.util.PlatformBackHandler
 import org.davidnardya.vocalcoach.core.util.rememberMicrophonePermissionState
+import org.davidnardya.vocalcoach.domain.models.VocalChallenge
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import vocalcoach.composeapp.generated.resources.Res
 
@@ -76,10 +81,15 @@ private val BloodRed = Color(0xFFB22222)
 @Composable
 fun AudioClassificationRoute(
     viewModel: AudioClassificationViewModel,
+    permissionManager: PermissionManager,
     onBack: () -> Unit,
 ) {
     val mic = rememberMicrophonePermissionState()
     val ui by viewModel.state.collectAsState()
+
+    if (ui.currentLevel >= 51) {
+        permissionManager.AskForSpeechRecognitionPermission(onResult = { })
+    }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val shake = remember { Animatable(0f) }
@@ -207,7 +217,7 @@ private fun AudioClassificationScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "GROWL ARENA",
+                        "VOCAL EVOLUTION",
                         style = MaterialTheme.typography.labelLarge,
                     )
                 },
@@ -227,10 +237,15 @@ private fun AudioClassificationScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
+                // 1. Challenge Overlay
+                ui.currentChallenge?.let { challenge ->
+                    ChallengeOverlay(challenge = challenge)
+                }
+
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "LEVEL ${ui.currentLevel}",
@@ -311,13 +326,59 @@ private fun AudioClassificationScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    // Display target for Level > 50
+                    if (ui.currentLevel > 50 && ui.currentChallenge != null) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (ui.isAnalyzing) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 3.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.size(12.dp))
+                                    Text(
+                                        text = "DECIPHERING GROWL...",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = ui.currentChallenge.target.uppercase(),
+                                    style = MaterialTheme.typography.displayMedium.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 4.sp,
+                                        color = ui.currentChallenge.type.color
+                                    ),
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                            ui.aiHeardTranscription?.let { heard ->
+                                Text(
+                                    text = "AI heard: ${heard.ifBlank { "—" }}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
                     Text(
                         text = "RAGE METER",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    RageMeterBar(progress = rageFill, modifier = Modifier.fillMaxWidth(0.92f))
+                    RageMeterBar(
+                        progress = rageFill, 
+                        color = ui.currentChallenge?.type?.color ?: BloodRed,
+                        modifier = Modifier.fillMaxWidth(0.92f)
+                    )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -384,8 +445,36 @@ private fun AudioClassificationScreen(
 }
 
 @Composable
+private fun ChallengeOverlay(challenge: VocalChallenge) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(challenge.type.color.copy(alpha = 0.15f))
+            .border(2.dp, challenge.type.color.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            .padding(16.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = challenge.type.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = challenge.type.color,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = challenge.description,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
 private fun RageMeterBar(
     progress: Float,
+    color: Color,
     modifier: Modifier = Modifier,
 ) {
     val track = MaterialTheme.colorScheme.surfaceVariant
@@ -395,7 +484,7 @@ private fun RageMeterBar(
         drawRoundRect(color = track, cornerRadius = r)
         val innerW = (size.width - stroke * 2) * progress
         drawRoundRect(
-            brush = Brush.horizontalGradient(listOf(BloodRed, ElectricOrange, Color(0xFFFFE082))),
+            brush = Brush.horizontalGradient(listOf(color, color.copy(alpha = 0.7f), color.copy(alpha = 0.4f))),
             topLeft = Offset(stroke, stroke),
             size = Size(
                 width = innerW.coerceAtLeast(0f),

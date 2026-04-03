@@ -52,6 +52,26 @@ class AndroidPermissionManager(private val context: Context) : PermissionManager
             context,
             Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED
+
+    override suspend fun hasSpeechRecognitionPermission(): Boolean = hasRecordAudioPermission()
+
+    @Composable
+    override fun AskForSpeechRecognitionPermission(onResult: (Boolean) -> Unit) {
+        val launcher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted -> onResult(granted) }
+        SideEffect {
+            when (
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO,
+                )
+            ) {
+                PackageManager.PERMISSION_GRANTED -> onResult(true)
+                else -> launcher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
 }
 
 actual fun createPermissionManager(): PermissionManager =

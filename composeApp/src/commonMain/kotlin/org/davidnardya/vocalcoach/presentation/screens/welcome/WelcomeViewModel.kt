@@ -14,7 +14,7 @@ import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
 
 class WelcomeViewModel(
-    repository: ScoreRepository,
+    private val repository: ScoreRepository,
     private val streakManagementUseCase: StreakManagementUseCase,
 ) : ViewModel() {
 
@@ -53,5 +53,14 @@ class WelcomeViewModel(
 
     fun consumeMilestoneBonusMessage() {
         _milestoneBonusMessage.value = null
+    }
+
+    /**
+     * Writes [newStats] directly to storage (no streak/day business rules). DataStore emits; [playerStats] updates.
+     */
+    fun updateStatsManually(newStats: PlayerStats) {
+        viewModelScope.launch {
+            repository.writePlayerStats(newStats)
+        }
     }
 }

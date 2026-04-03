@@ -11,16 +11,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-private val Charcoal = Color(0xFF121212)
+/** Deep Charcoal (#121212) — canonical app scaffold background; keep in sync with Material [background]. */
+val DeepCharcoal: Color = Color(0xFF121212)
+
 private val ElectricOrange = Color(0xFFFF8F00)
 private val BloodRed = Color(0xFFB22222)
 
 val BrutalMetalColorScheme: ColorScheme = darkColorScheme(
     primary = ElectricOrange,
-    onPrimary = Charcoal,
+    onPrimary = DeepCharcoal,
     secondary = BloodRed,
     onSecondary = Color.White,
-    background = Charcoal,
+    background = DeepCharcoal,
     onBackground = Color(0xFFE8E8E8),
     surface = Color(0xFF1E1E1E),
     onSurface = Color(0xFFE8E8E8),

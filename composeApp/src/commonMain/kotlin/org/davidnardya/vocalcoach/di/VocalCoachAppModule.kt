@@ -10,7 +10,13 @@ import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.audio.AudioClassificationUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.HandleGrowlDetectionUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
+import org.davidnardya.vocalcoach.domain.usecase.audio.LocalWhisperService
+import org.davidnardya.vocalcoach.domain.usecase.audio.LocalWhisperServiceImpl
+import org.davidnardya.vocalcoach.domain.usecase.audio.TranscriptionService
+import org.davidnardya.vocalcoach.domain.usecase.audio.VocalValidator
+import org.davidnardya.vocalcoach.domain.usecase.audio.VocalValidatorImpl
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.ChallengeProvider
 import org.davidnardya.vocalcoach.domain.usecase.game.HandleLevelUpUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.GetNotificationSettingsUseCase
@@ -20,11 +26,18 @@ import org.davidnardya.vocalcoach.domain.usecase.settings.SaveSettingsUseCase
 expect fun createAudioClassifier(): AudioClassifier
 expect fun createAudioRecorder(): AudioRecorder
 expect fun createNotificationScheduler(): NotificationScheduler
+expect fun createTranscriptionService(): TranscriptionService
 
 private val scoreRepository: ScoreRepository by lazy { ScoreRepositoryImpl() }
 private val notificationSettingsRepository: NotificationSettingsRepository by lazy { NotificationSettingsRepositoryImpl() }
 private val calculatePointsUseCase: CalculatePointsUseCase by lazy { CalculatePointsUseCase() }
 private val handleLevelUpUseCase: HandleLevelUpUseCase by lazy { HandleLevelUpUseCase() }
+private val challengeProvider: ChallengeProvider by lazy { ChallengeProvider() }
+private val transcriptionService: TranscriptionService by lazy { createTranscriptionService() }
+private val whisperService: LocalWhisperService by lazy { LocalWhisperServiceImpl() }
+private val vocalValidator: VocalValidator by lazy {
+    VocalValidatorImpl(transcriptionService, whisperService, calculatePointsUseCase)
+}
 
 fun createAudioClassificationUseCase(): AudioClassificationUseCase {
     return AudioClassificationUseCase(
@@ -37,6 +50,7 @@ fun createLevelTrackerUseCase(): LevelTrackerUseCase = LevelTrackerUseCase(score
 fun createScoreRepository(): ScoreRepository = scoreRepository
 fun createCalculatePointsUseCase(): CalculatePointsUseCase = calculatePointsUseCase
 fun createHandleLevelUpUseCase(): HandleLevelUpUseCase = handleLevelUpUseCase
+fun createChallengeProvider(): ChallengeProvider = challengeProvider
 fun createStreakManagementUseCase(): StreakManagementUseCase =
     StreakManagementUseCase(scoreRepository, handleLevelUpUseCase, isDebugStreakTest = true)
 
@@ -44,8 +58,9 @@ fun createStreakManagementUseCase(): StreakManagementUseCase =
 fun createHandleGrowlDetectionUseCase(streakManagement: StreakManagementUseCase): HandleGrowlDetectionUseCase =
     HandleGrowlDetectionUseCase(
         scoreRepository,
-        calculatePointsUseCase,
         streakManagement,
+        challengeProvider,
+        vocalValidator,
     )
 
 fun createGetNotificationSettingsUseCase() = GetNotificationSettingsUseCase(notificationSettingsRepository)
