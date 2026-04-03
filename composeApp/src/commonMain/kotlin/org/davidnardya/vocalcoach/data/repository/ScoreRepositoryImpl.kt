@@ -15,9 +15,8 @@ import org.davidnardya.vocalcoach.domain.models.PlayerStats
 import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 
 class ScoreRepositoryImpl : ScoreRepository {
-    /** Temporary default for testing the 25× streak milestone; revert to `0` for release. */
     private companion object {
-        const val DefaultStreakCount = 24
+        const val DefaultStreakCount = 0
     }
 
     private val dataStore: DataStore<Preferences> = PreferenceDataStoreFactory.createWithPath(

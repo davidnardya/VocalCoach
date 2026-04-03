@@ -30,7 +30,7 @@ data class AudioClassificationUiState(
     val totalScore: Long = 0L,
     val currentLevel: Int = 1,
     val levelsGainedToday: Int = 0,
-    val streakCount: Int = 24,
+    val streakCount: Int = 0,
     val scoreMultiplier: Double = 1.0,
     val message: String? = null,
     val showExitConfirmation: Boolean = false,

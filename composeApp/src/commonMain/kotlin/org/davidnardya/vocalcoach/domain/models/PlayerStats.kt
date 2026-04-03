@@ -32,8 +32,7 @@ data class PlayerStats(
 
         fun fromLegacyIntScore(score: Int): PlayerStats = PlayerStats(
             totalScore = score.toLong(),
-            // Match ScoreRepositoryImpl default streak for milestone testing (revert to 0 for release).
-            streakCount = 24,
+            streakCount = 0,
             lastLevelUpDate = null,
             lastStreakIncrementDate = null,
             levelsGainedToday = 0,
