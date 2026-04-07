@@ -68,6 +68,7 @@ import kotlinx.coroutines.launch
 import org.davidnardya.vocalcoach.core.util.PermissionManager
 import org.davidnardya.vocalcoach.core.util.PlatformBackHandler
 import org.davidnardya.vocalcoach.core.util.rememberMicrophonePermissionState
+import org.davidnardya.vocalcoach.domain.models.LabelScore
 import org.davidnardya.vocalcoach.domain.models.VocalChallenge
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import vocalcoach.composeapp.generated.resources.Res
@@ -76,6 +77,7 @@ private const val MODEL_RESOURCE_PATH = "files/soundclassifier_with_metadata.tfl
 
 private val ElectricOrange = Color(0xFFFF8F00)
 private val BloodRed = Color(0xFFB22222)
+private val Gold = Color(0xFFFFD700)
 
 @OptIn(ExperimentalResourceApi::class)
 @Composable
@@ -189,14 +191,6 @@ private fun AudioClassificationScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isGrowl = ui.currentLabel.contains("Growl", ignoreCase = true)
-    val rageTarget = if (ui.isRecording && isGrowl) 1f else 0f
-    val rageFill by animateFloatAsState(
-        targetValue = rageTarget,
-        animationSpec = tween(280, easing = LinearEasing),
-        label = "rage",
-    )
-
     val mult = ui.scoreMultiplier
     val multHot = mult >= 2.0
     val glowTransition = rememberInfiniteTransition(label = "scoreGlow")
@@ -224,6 +218,11 @@ private fun AudioClassificationScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (ui.isRecording && ui.top3Labels.isNotEmpty()) {
+                        DebugOverlay(labels = ui.top3Labels)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -326,7 +325,7 @@ private fun AudioClassificationScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    // Display target for Level > 50
+                    // Era 2+ Content Analysis UI
                     if (ui.currentLevel > 50 && ui.currentChallenge != null) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             if (ui.isAnalyzing) {
@@ -369,14 +368,13 @@ private fun AudioClassificationScreen(
                     }
 
                     Text(
-                        text = "RAGE METER",
+                        text = "PRECISION METER",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    RageMeterBar(
-                        progress = rageFill, 
-                        color = ui.currentChallenge?.type?.color ?: BloodRed,
+                    PrecisionMeter(
+                        score = ui.precisionScore,
                         modifier = Modifier.fillMaxWidth(0.92f)
                     )
 
@@ -386,17 +384,19 @@ private fun AudioClassificationScreen(
                         text = "Vocal Status",
                         style = MaterialTheme.typography.titleMedium,
                     )
+                    val isGrowl = ui.currentLabel.startsWith("Growl_")
                     Text(
                         text = when {
-                            isGrowl -> "GROWL!"
-                            ui.isRecording -> "Clean"
-                            else -> "Idling"
+                            isGrowl -> ui.currentLabel.substringAfter("Growl_")
+                            ui.currentLabel == "Clean_Vocals" -> "CLEAN"
+                            ui.isRecording -> "BACKGROUND"
+                            else -> "IDLING"
                         },
                         style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Black),
-                        color = if (isGrowl) BloodRed else MaterialTheme.colorScheme.onSurface,
+                        color = if (isGrowl) BloodRed else if (ui.currentLabel == "Clean_Vocals") Color.Cyan else MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "Heard: ${ui.currentLabel}",
+                        text = "Heard: ${ui.currentLabel} (${(ui.precisionScore.safeUnitFloat() * 100).toInt()}%)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -445,6 +445,77 @@ private fun AudioClassificationScreen(
 }
 
 @Composable
+private fun DebugOverlay(labels: List<LabelScore>) {
+    Column(
+        modifier = Modifier
+            .padding(end = 16.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = 0.6f))
+            .padding(4.dp)
+    ) {
+        labels.forEach { ls ->
+            Text(
+                text = "${ls.label}: ${(ls.score * 100).toInt()}%",
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun PrecisionMeter(
+    score: Float,
+    modifier: Modifier = Modifier,
+) {
+    val progressTarget = score.safeUnitFloat()
+    val animatedProgress by animateFloatAsState(
+        targetValue = progressTarget,
+        animationSpec = tween(200, easing = LinearEasing),
+        label = "precision"
+    )
+
+    val color = when {
+        animatedProgress >= 0.90f -> Gold // SUCCESS
+        animatedProgress >= 0.51f -> Color(0xFFFFA500) // Orange (Close!)
+        else -> Color.Red // Weak
+    }
+
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    Canvas(modifier = modifier.height(20.dp)) {
+        val stroke = 2.dp.toPx()
+        val r = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+        drawRoundRect(color = track, cornerRadius = r)
+        
+        val innerW = (size.width - stroke * 2) * animatedProgress
+        drawRoundRect(
+            brush = Brush.horizontalGradient(listOf(color, color.copy(alpha = 0.8f))),
+            topLeft = Offset(stroke, stroke),
+            size = Size(
+                width = innerW.coerceAtLeast(0f),
+                height = size.height - stroke * 2,
+            ),
+            cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx()),
+        )
+
+        // Threshold Mark at 90%
+        val thresholdX = size.width * 0.90f
+        drawLine(
+            color = Color.White.copy(alpha = 0.5f),
+            start = Offset(thresholdX, 0f),
+            end = Offset(thresholdX, size.height),
+            strokeWidth = 2.dp.toPx()
+        )
+    }
+}
+
+private fun Float.safeUnitFloat(): Float {
+    if (!isFinite()) return 0f
+    return coerceIn(0f, 1f)
+}
+
+@Composable
 private fun ChallengeOverlay(challenge: VocalChallenge) {
     Box(
         modifier = Modifier
@@ -468,29 +539,5 @@ private fun ChallengeOverlay(challenge: VocalChallenge) {
                 fontWeight = FontWeight.Medium
             )
         }
-    }
-}
-
-@Composable
-private fun RageMeterBar(
-    progress: Float,
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    val track = MaterialTheme.colorScheme.surfaceVariant
-    Canvas(modifier = modifier.height(20.dp)) {
-        val stroke = 2.dp.toPx()
-        val r = CornerRadius(10.dp.toPx(), 10.dp.toPx())
-        drawRoundRect(color = track, cornerRadius = r)
-        val innerW = (size.width - stroke * 2) * progress
-        drawRoundRect(
-            brush = Brush.horizontalGradient(listOf(color, color.copy(alpha = 0.7f), color.copy(alpha = 0.4f))),
-            topLeft = Offset(stroke, stroke),
-            size = Size(
-                width = innerW.coerceAtLeast(0f),
-                height = size.height - stroke * 2,
-            ),
-            cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx()),
-        )
     }
 }

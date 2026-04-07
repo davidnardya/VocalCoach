@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.davidnardya.vocalcoach.domain.models.LabelScore
 import org.davidnardya.vocalcoach.domain.models.VocalChallenge
 import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.audio.AudioClassificationUseCase
@@ -41,9 +42,12 @@ data class AudioClassificationUiState(
     val levelUpCelebration: LevelUpCelebration? = null,
     val isMilestoneLevelUp: Boolean = false,
     val currentChallenge: VocalChallenge? = null,
-    /** Last STT text (Era 2+) for calibration when level > 50. */
     val aiHeardTranscription: String? = null,
     val isAnalyzing: Boolean = false,
+    /** Precision Meter: 0.0 to 1.0 based on topScore. Success threshold is 0.90. */
+    val precisionScore: Float = 0f,
+    /** Top 3 detected labels for debug overlay. */
+    val top3Labels: List<LabelScore> = emptyList(),
 )
 
 class AudioClassificationViewModel(
@@ -56,9 +60,7 @@ class AudioClassificationViewModel(
     private val challengeProvider: ChallengeProvider,
 ) : ViewModel() {
 
-    private val _internalState = MutableStateFlow(
-        InternalState(isRecording = false, currentLabel = "—"),
-    )
+    private val _internalState = MutableStateFlow(InternalState())
 
     private val _levelUpCelebration = MutableStateFlow<LevelUpCelebration?>(null)
     private var clearLevelUpOverlayJob: Job? = null
@@ -123,6 +125,8 @@ class AudioClassificationViewModel(
             currentChallenge = challenge,
             aiHeardTranscription = internal.aiHeardTranscription,
             isAnalyzing = internal.isAnalyzing,
+            precisionScore = internal.precisionScore,
+            top3Labels = internal.top3Labels,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -150,24 +154,46 @@ class AudioClassificationViewModel(
             try {
                 val bytes = cachedModelBytes ?: modelLoader().also { cachedModelBytes = it }
                 _internalState.update {
-                    it.copy(currentLabel = "—", message = null, aiHeardTranscription = null, isAnalyzing = false)
+                    it.copy(
+                        currentLabel = "—",
+                        message = null,
+                        aiHeardTranscription = null,
+                        isAnalyzing = false,
+                        precisionScore = 0f,
+                        top3Labels = emptyList()
+                    )
                 }
                 audioUseCase.start(viewModelScope, bytes) { snap ->
+                    val safeTopScore = snap.topScore.safeUnitFloat()
+                    val safeTop3 = snap.ranked
+                        .take(3)
+                        .map { it.copy(score = it.score.safeUnitFloat()) }
                     _internalState.update { s ->
-                        s.copy(currentLabel = snap.topLabel)
+                        s.copy(
+                            currentLabel = snap.topLabel,
+                            precisionScore = safeTopScore,
+                            top3Labels = safeTop3
+                        )
                     }
                     
-                    // Only process if not already busy with a heavy transcription (Whisper)
                     if (isProcessingGrowl) return@start
                     
                     viewModelScope.launch {
                         val currentStats = repository.getPlayerStats().first()
                         
-                        // We set isAnalyzing only if we think a growl happened and we are in Era 2+
-                        val isLikelyGrowl = snap.topLabel.contains("Growl", ignoreCase = true) && snap.topScore >= 0.45f
-                        if (isLikelyGrowl && currentStats.level >= 51) {
+                        // We use the new 0.90 threshold for analyzing state UI feedback
+                        val isLikelyGrowl = snap.topLabel.startsWith("Growl_") && safeTopScore >= 0.45f
+                        if (isLikelyGrowl) {
                             _internalState.update { it.copy(isAnalyzing = true) }
                             isProcessingGrowl = true
+                        } else {
+                            // If it's not a growl (e.g. background or clean), don't trigger validator logic yet
+                            // unless it's a very high confidence clean vocal to show anti-cheat feedback.
+                            if (snap.topLabel == "Clean_Vocals" && safeTopScore >= 0.80f) {
+                                isProcessingGrowl = true
+                            } else {
+                                return@launch
+                            }
                         }
 
                         val feedback: GrowlUiFeedback = handleGrowlDetectionUseCase(snap, currentStats)
@@ -214,11 +240,18 @@ class AudioClassificationViewModel(
     }
 
     private data class InternalState(
-        val isRecording: Boolean,
-        val currentLabel: String,
+        val isRecording: Boolean = false,
+        val currentLabel: String = "—",
         val message: String? = null,
         val showExitConfirmation: Boolean = false,
         val aiHeardTranscription: String? = null,
         val isAnalyzing: Boolean = false,
+        val precisionScore: Float = 0f,
+        val top3Labels: List<LabelScore> = emptyList(),
     )
+}
+
+private fun Float.safeUnitFloat(): Float {
+    if (!isFinite()) return 0f
+    return coerceIn(0f, 1f)
 }

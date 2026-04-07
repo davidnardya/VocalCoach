@@ -36,7 +36,7 @@ private val challengeProvider: ChallengeProvider by lazy { ChallengeProvider() }
 private val transcriptionService: TranscriptionService by lazy { createTranscriptionService() }
 private val whisperService: LocalWhisperService by lazy { LocalWhisperServiceImpl() }
 private val vocalValidator: VocalValidator by lazy {
-    VocalValidatorImpl(transcriptionService, whisperService, calculatePointsUseCase)
+    VocalValidatorImpl(calculatePointsUseCase)
 }
 
 fun createAudioClassificationUseCase(): AudioClassificationUseCase {
