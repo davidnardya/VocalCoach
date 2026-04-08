@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Settings
@@ -30,7 +35,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -51,15 +58,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import org.davidnardya.vocalcoach.core.util.PermissionManager
 import org.davidnardya.vocalcoach.di.createScoreRepository
 import org.davidnardya.vocalcoach.di.createStreakManagementUseCase
+import org.davidnardya.vocalcoach.domain.models.TrainingStage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WelcomeScreen(
     permissionManager: PermissionManager,
-    onStartGame: () -> Unit,
+    onStartGame: (TrainingStage) -> Unit,
     onNavigateToSettings: () -> Unit,
     viewModel: WelcomeViewModel = viewModel {
         WelcomeViewModel(
@@ -69,12 +78,18 @@ fun WelcomeScreen(
     },
 ) {
     val stats by viewModel.playerStats.collectAsState()
+    val roadmap by viewModel.roadmapState.collectAsState()
     val penaltyMessage by viewModel.penaltyMessage.collectAsState()
     val milestoneBonusMessage by viewModel.milestoneBonusMessage.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     var showOnboardingDialog by remember { mutableStateOf(false) }
+    var showDevDialog by remember { mutableStateOf(false) }
+    var titleTapCount by remember { mutableStateOf(0) }
+    var titleTapWindowStartMs by remember { mutableStateOf(0L) }
+    var devScoreInput by remember { mutableStateOf("") }
+    var devLevelInput by remember { mutableStateOf("") }
     var triggerMic by remember { mutableStateOf(false) }
     var triggerNotif by remember { mutableStateOf(false) }
 
@@ -147,6 +162,57 @@ fun WelcomeScreen(
         )
     }
 
+    if (showDevDialog) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Developer Controls", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Set score and level for stage testing.")
+                    TextField(
+                        value = devScoreInput,
+                        onValueChange = { devScoreInput = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Score") },
+                        singleLine = true,
+                    )
+                    TextField(
+                        value = devLevelInput,
+                        onValueChange = { devLevelInput = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Level") },
+                        singleLine = true,
+                    )
+                    Text(
+                        "Level maps to minimum score: (level - 1) * 10",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val score = devScoreInput.toIntOrNull() ?: 0
+                        val level = devLevelInput.toIntOrNull() ?: 1
+                        viewModel.setTestProgress(score, level)
+                    },
+                ) {
+                    Text("Apply")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            devScoreInput = "0"
+                            devLevelInput = "1"
+                            viewModel.setTestProgress(0, 1)
+                        },
+                    ) { Text("Reset") }
+                    TextButton(onClick = { showDevDialog = false }) { Text("Close") }
+                }
+            },
+        )
+    }
+
     val firePulse = rememberInfiniteTransition(label = "fire")
     val fireScale by firePulse.animateFloat(
         initialValue = 0.92f,
@@ -168,6 +234,21 @@ fun WelcomeScreen(
                         "METAL VOCAL TRAINER",
                         style = MaterialTheme.typography.labelLarge,
                         letterSpacing = 2.sp,
+                        modifier = Modifier.clickable {
+                            val now = Clock.System.now().toEpochMilliseconds()
+                            if (titleTapWindowStartMs == 0L || now - titleTapWindowStartMs > 6000L) {
+                                titleTapWindowStartMs = now
+                                titleTapCount = 0
+                            }
+                            titleTapCount += 1
+                            if (titleTapCount >= 20) {
+                                showDevDialog = true
+                                titleTapCount = 0
+                                titleTapWindowStartMs = 0L
+                                devScoreInput = (stats?.totalScore ?: 0L).toString()
+                                devLevelInput = (stats?.level ?: 1).toString()
+                            }
+                        },
                     )
                 },
                 actions = {
@@ -180,7 +261,11 @@ fun WelcomeScreen(
         },
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -226,6 +311,15 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
 
+            RoadmapSection(
+                items = roadmap.items,
+                onStageSelected = { stage ->
+                    viewModel.selectStage(stage)
+                },
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             Button(
                 onClick = {
                     if (!canEnterGame) {
@@ -235,7 +329,7 @@ fun WelcomeScreen(
                             notifGranted = permissionManager.hasNotificationPermission()
                         }
                     } else {
-                        onStartGame()
+                        onStartGame(roadmap.currentStage)
                     }
                 },
                 modifier = Modifier.height(56.dp),
@@ -254,6 +348,69 @@ fun WelcomeScreen(
                 Spacer(modifier = Modifier.height(12.dp))
                 TextButton(onClick = { showOnboardingDialog = true }) {
                     Text("Grant microphone & notifications to play")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoadmapSection(
+    items: List<StageRoadmapItem>,
+    onStageSelected: (TrainingStage) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 8.dp),
+    ) {
+        Text(
+            text = "ROADMAP",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+        )
+        items.forEach { item ->
+            val cardColor = when {
+                !item.isUnlocked -> MaterialTheme.colorScheme.surfaceVariant
+                item.isCurrent -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surface
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = cardColor,
+                tonalElevation = if (item.isCurrent) 3.dp else 0.dp,
+                modifier = Modifier,
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${item.stage.title} - ${item.stage.description}",
+                            fontWeight = if (item.isCurrent) FontWeight.Bold else FontWeight.Medium,
+                        )
+                        item.requirementText?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Box {
+                        val status = when {
+                            !item.isUnlocked -> "LOCKED"
+                            item.isCurrent -> "ACTIVE"
+                            else -> "COMPLETED"
+                        }
+                        TextButton(
+                            enabled = item.isUnlocked,
+                            onClick = { onStageSelected(item.stage) },
+                        ) {
+                            Text(status)
+                        }
+                    }
                 }
             }
         }

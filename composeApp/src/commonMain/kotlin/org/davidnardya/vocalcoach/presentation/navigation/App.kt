@@ -13,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navDeepLink
+import androidx.navigation.toRoute
 import kotlinx.coroutines.flow.collectLatest
 import org.davidnardya.vocalcoach.core.util.DeepLinkHandler
 import org.davidnardya.vocalcoach.core.util.createPermissionManager
@@ -34,7 +35,7 @@ fun App() {
             DeepLinkHandler.deepLinkFlow.collectLatest { url ->
                 url?.let {
                     if (it.startsWith("growlgame://start")) {
-                        navController.navigate(GameRoute) {
+                        navController.navigate(GameRoute()) {
                             launchSingleTop = true
                         }
                     }
@@ -52,7 +53,7 @@ fun App() {
                 WelcomeScreen(
                     permissionManager = permissionManager,
                     onStartGame = {
-                        navController.navigate(GameRoute)
+                        navController.navigate(GameRoute(stage = it))
                     },
                     onNavigateToSettings = {
                         navController.navigate(SettingsRoute)
@@ -64,7 +65,8 @@ fun App() {
                     navDeepLink<GameRoute>(basePath = "growlgame://start")
                 )
             ) {
-                val viewModel = rememberAudioClassificationViewModel()
+                val route = it.toRoute<GameRoute>()
+                val viewModel = rememberAudioClassificationViewModel(route.stage)
                 AudioClassificationRoute(
                     viewModel = viewModel,
                     onBack = { navController.popBackStack() }

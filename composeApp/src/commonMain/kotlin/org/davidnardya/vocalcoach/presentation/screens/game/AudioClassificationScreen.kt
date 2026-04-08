@@ -2,11 +2,7 @@ package org.davidnardya.vocalcoach.presentation.screens.game
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -71,6 +67,7 @@ private const val MODEL_RESOURCE_PATH = "files/soundclassifier_with_metadata.tfl
 
 private val ElectricOrange = Color(0xFFFF8F00)
 private val BloodRed = Color(0xFFB22222)
+private val Gold = Color(0xFFFFD700)
 
 @OptIn(ExperimentalResourceApi::class)
 @Composable
@@ -180,25 +177,15 @@ private fun AudioClassificationScreen(
     modifier: Modifier = Modifier,
 ) {
     val isGrowl = ui.currentLabel.contains("Growl", ignoreCase = true)
-    val rageTarget = if (ui.isRecording && isGrowl) 1f else 0f
-    val rageFill by animateFloatAsState(
-        targetValue = rageTarget,
+    val precision by animateFloatAsState(
+        targetValue = ui.precisionScore.safeUnitFloat(),
         animationSpec = tween(280, easing = LinearEasing),
-        label = "rage",
+        label = "precision",
     )
 
     val mult = ui.scoreMultiplier
     val multHot = mult >= 2.0
-    val glowTransition = rememberInfiniteTransition(label = "scoreGlow")
-    val glowAlpha by glowTransition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(650, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "glow",
-    )
+    val glowAlpha = if (multHot) 0.9f else 1f
 
     Scaffold(
         modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
@@ -305,6 +292,11 @@ private fun AudioClassificationScreen(
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Text(
+                        text = "${ui.currentStage.title} / Unlocked: ${ui.maxUnlockedStage.title}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
                 }
 
                 Column(
@@ -312,14 +304,35 @@ private fun AudioClassificationScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "RAGE METER",
+                        text = "PRECISION METER",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    RageMeterBar(progress = rageFill, modifier = Modifier.fillMaxWidth(0.92f))
+                    RageMeterBar(progress = precision, modifier = Modifier.fillMaxWidth(0.92f))
 
                     Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = ui.stagePrompt,
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    ui.stageFeedback?.let { feedback ->
+                        Text(
+                            text = feedback,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    if (ui.currentStage.ordinal >= 1) {
+                        Text(
+                            text = "Combo ${ui.stageCombo}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
                         text = "Vocal Status",
@@ -335,10 +348,19 @@ private fun AudioClassificationScreen(
                         color = if (isGrowl) BloodRed else MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "Heard: ${ui.currentLabel}",
+                        text = "Heard: ${ui.currentLabel} (${(ui.precisionScore.safeUnitFloat() * 100).toInt()}%)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
+                    if (ui.top3Labels.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        ui.top3Labels.forEach { ls ->
+                            Text(
+                                text = "${ls.label}: ${(ls.score.safeUnitFloat() * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(40.dp))
 
@@ -395,7 +417,7 @@ private fun RageMeterBar(
         drawRoundRect(color = track, cornerRadius = r)
         val innerW = (size.width - stroke * 2) * progress
         drawRoundRect(
-            brush = Brush.horizontalGradient(listOf(BloodRed, ElectricOrange, Color(0xFFFFE082))),
+            brush = Brush.horizontalGradient(listOf(BloodRed, ElectricOrange, Gold)),
             topLeft = Offset(stroke, stroke),
             size = Size(
                 width = innerW.coerceAtLeast(0f),
@@ -404,4 +426,9 @@ private fun RageMeterBar(
             cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx()),
         )
     }
+}
+
+private fun Float.safeUnitFloat(): Float {
+    if (!isFinite()) return 0f
+    return coerceIn(0f, 1f)
 }
