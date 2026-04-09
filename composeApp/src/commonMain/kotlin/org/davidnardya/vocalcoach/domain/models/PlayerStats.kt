@@ -1,9 +1,10 @@
 package org.davidnardya.vocalcoach.domain.models
 
 import kotlinx.datetime.LocalDate
+import kotlin.math.floor
 
 data class PlayerStats(
-    val totalScore: Long,
+    val totalScore: Double, // Changed to Double to handle fractional points (0.5)
     val streakCount: Int,
     /** ISO calendar date (yyyy-MM-dd) of last level-up (used for inactivity penalty). */
     val lastLevelUpDate: String?,
@@ -17,8 +18,8 @@ data class PlayerStats(
         get() = levelFromTotalScore(totalScore)
 
     companion object {
-        fun levelFromTotalScore(totalScore: Long): Int =
-            ((totalScore / 10L) + 1L).toInt()
+        fun levelFromTotalScore(totalScore: Double): Int =
+            ((floor(totalScore) / 10.0) + 1.0).toInt()
 
         fun withDayRollover(stats: PlayerStats, today: LocalDate): PlayerStats {
             val todayStr = today.toString()
@@ -31,7 +32,7 @@ data class PlayerStats(
         }
 
         fun fromLegacyIntScore(score: Int): PlayerStats = PlayerStats(
-            totalScore = score.toLong(),
+            totalScore = score.toDouble(),
             streakCount = 0,
             lastLevelUpDate = null,
             lastStreakIncrementDate = null,

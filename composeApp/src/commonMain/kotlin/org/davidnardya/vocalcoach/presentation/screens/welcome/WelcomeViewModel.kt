@@ -21,12 +21,14 @@ data class StageRoadmapItem(
     val stage: TrainingStage,
     val isCurrent: Boolean,
     val isUnlocked: Boolean,
+    val isMaxUnlocked: Boolean,
     val requirementText: String?,
 )
 
 data class WelcomeRoadmapState(
     val currentStage: TrainingStage = TrainingStage.Stage1,
     val maxUnlockedStage: TrainingStage = TrainingStage.Stage1,
+    val progressInCurrentStage: Float = 0f,
     val items: List<StageRoadmapItem> = emptyList(),
 )
 
@@ -58,7 +60,6 @@ class WelcomeViewModel(
             return@combine WelcomeRoadmapState()
         }
         val progression = resolveStageProgression(
-            totalScore = stats.totalScore,
             level = stats.level,
             preferredStage = selected,
         )
@@ -68,18 +69,20 @@ class WelcomeViewModel(
                 null
             } else {
                 val req = requirementForStage(stage)
-                "Unlock at Level ${req.minLevel} and ${req.minTotalScore} points"
+                "Unlock at Level ${req.minLevel}"
             }
             StageRoadmapItem(
                 stage = stage,
                 isCurrent = stage == progression.currentStage,
                 isUnlocked = isUnlocked,
+                isMaxUnlocked = stage == progression.maxUnlockedStage,
                 requirementText = requirementText,
             )
         }
         WelcomeRoadmapState(
             currentStage = progression.currentStage,
             maxUnlockedStage = progression.maxUnlockedStage,
+            progressInCurrentStage = progression.progressInCurrentStage,
             items = items,
         )
     }.stateIn(
@@ -117,9 +120,9 @@ class WelcomeViewModel(
     }
 
     fun setTestProgress(scoreInput: Int, levelInput: Int) {
-        val safeScore = scoreInput.coerceAtLeast(0).toLong()
+        val safeScore = scoreInput.coerceAtLeast(0).toDouble()
         val safeLevel = levelInput.coerceAtLeast(1)
-        val minScoreFromLevel = ((safeLevel - 1) * 10).toLong()
+        val minScoreFromLevel = ((safeLevel - 1) * 10).toDouble()
         val effectiveScore = maxOf(safeScore, minScoreFromLevel)
 
         viewModelScope.launch {

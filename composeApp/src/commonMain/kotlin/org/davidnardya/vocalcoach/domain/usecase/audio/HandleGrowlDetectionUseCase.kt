@@ -22,6 +22,8 @@ class HandleGrowlDetectionUseCase(
     private val statsUpdateMutex = Mutex()
 
     suspend operator fun invoke(snapshot: ClassificationSnapshot) {
+        // This use case seems to be used in some contexts, but the ViewModel also has maybeScoreAttempt.
+        // Let's ensure consistency if this is used.
         if (!snapshot.topLabel.contains("Growl", ignoreCase = true) || snapshot.topScore <= 0.5f) {
             return
         }
@@ -39,8 +41,10 @@ class HandleGrowlDetectionUseCase(
         statsUpdateMutex.withLock {
             repository.updateStats { raw ->
                 val rolled = PlayerStats.withDayRollover(raw, today)
-                val levelsForMultiplier = rolled.levelsGainedToday
-                val points = calculatePointsUseCase.pointsForGrowl(levelsForMultiplier)
+                // Note: HandleGrowlDetectionUseCase doesn't know about current session combo or selected stage.
+                // It's mostly used for general detection. For the specific "Game" mode, the ViewModel handles it.
+                // However, we should keep it compatible with Double score.
+                val points = 1.0 // Default fallback
 
                 var total = rolled.totalScore + points
                 val oldLevel = rolled.level

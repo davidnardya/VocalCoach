@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -24,7 +25,8 @@ class ScoreRepositoryImpl : ScoreRepository {
     )
 
     private val LEGACY_SCORE_INT = intPreferencesKey("total_score")
-    private val TOTAL_SCORE_LONG = longPreferencesKey("total_score_long")
+    private val LEGACY_SCORE_LONG = longPreferencesKey("total_score_long")
+    private val TOTAL_SCORE_DOUBLE = doublePreferencesKey("total_score_double")
     private val STREAK_KEY = intPreferencesKey("streak_count")
     private val LAST_LEVEL_UP_KEY = stringPreferencesKey("last_level_up_date")
     private val LAST_STREAK_INC_KEY = stringPreferencesKey("last_streak_increment_date")
@@ -37,8 +39,9 @@ class ScoreRepositoryImpl : ScoreRepository {
         dataStore.edit { preferences ->
             val current = preferences.toPlayerStats()
             val next = transform(current)
-            preferences[TOTAL_SCORE_LONG] = next.totalScore
+            preferences[TOTAL_SCORE_DOUBLE] = next.totalScore
             preferences.remove(LEGACY_SCORE_INT)
+            preferences.remove(LEGACY_SCORE_LONG)
             preferences[STREAK_KEY] = next.streakCount
             next.lastLevelUpDate?.let { preferences[LAST_LEVEL_UP_KEY] = it } ?: preferences.remove(LAST_LEVEL_UP_KEY)
             next.lastStreakIncrementDate?.let { preferences[LAST_STREAK_INC_KEY] = it }
@@ -50,8 +53,9 @@ class ScoreRepositoryImpl : ScoreRepository {
 
     override suspend fun resetScore() {
         dataStore.edit { preferences ->
-            preferences[TOTAL_SCORE_LONG] = 0L
+            preferences[TOTAL_SCORE_DOUBLE] = 0.0
             preferences.remove(LEGACY_SCORE_INT)
+            preferences.remove(LEGACY_SCORE_LONG)
             preferences[STREAK_KEY] = DefaultStreakCount
             preferences.remove(LAST_LEVEL_UP_KEY)
             preferences.remove(LAST_STREAK_INC_KEY)
@@ -61,19 +65,11 @@ class ScoreRepositoryImpl : ScoreRepository {
     }
 
     private fun Preferences.toPlayerStats(): PlayerStats {
-        val longScore = this[TOTAL_SCORE_LONG]
+        val doubleScore = this[TOTAL_SCORE_DOUBLE]
+        val longScore = this[LEGACY_SCORE_LONG]
         val legacyInt = this[LEGACY_SCORE_INT]
-        val total = longScore ?: legacyInt?.toLong() ?: 0L
-
-        val hasNewModel = this[STREAK_KEY] != null ||
-            this[LAST_LEVEL_UP_KEY] != null ||
-            this[LAST_STREAK_INC_KEY] != null ||
-            this[LEVELS_TODAY_KEY] != null ||
-            longScore != null
-
-        if (!hasNewModel && legacyInt != null) {
-            return PlayerStats.fromLegacyIntScore(legacyInt)
-        }
+        
+        val total = doubleScore ?: longScore?.toDouble() ?: legacyInt?.toDouble() ?: 0.0
 
         return PlayerStats(
             totalScore = total,

@@ -30,32 +30,31 @@ enum class TrainingStage(
 }
 
 data class StageRequirement(
-    val minTotalScore: Long,
     val minLevel: Int,
 )
 
 data class StageProgression(
     val currentStage: TrainingStage,
     val maxUnlockedStage: TrainingStage,
+    val progressInCurrentStage: Float, // 0.0 to 1.0, representing 5 levels
 )
 
 private val stageRequirements: Map<TrainingStage, StageRequirement> = mapOf(
-    TrainingStage.Stage1 to StageRequirement(minTotalScore = 0L, minLevel = 1),
-    TrainingStage.Stage2 to StageRequirement(minTotalScore = 50L, minLevel = 5),
-    TrainingStage.Stage3 to StageRequirement(minTotalScore = 150L, minLevel = 8),
-    TrainingStage.Stage4 to StageRequirement(minTotalScore = 300L, minLevel = 12),
-    TrainingStage.Stage5 to StageRequirement(minTotalScore = 500L, minLevel = 16),
+    TrainingStage.Stage1 to StageRequirement(minLevel = 1),
+    TrainingStage.Stage2 to StageRequirement(minLevel = 51),
+    TrainingStage.Stage3 to StageRequirement(minLevel = 101),
+    TrainingStage.Stage4 to StageRequirement(minLevel = 151),
+    TrainingStage.Stage5 to StageRequirement(minLevel = 201),
 )
 
 fun resolveStageProgression(
-    totalScore: Long,
     level: Int,
     preferredStage: TrainingStage?,
 ): StageProgression {
     val maxUnlocked = TrainingStage.entries
         .filter { stage ->
             val requirement = stageRequirements.getValue(stage)
-            totalScore >= requirement.minTotalScore && level >= requirement.minLevel
+            level >= requirement.minLevel
         }
         .maxByOrNull { it.ordinal }
         ?: TrainingStage.Stage1
@@ -66,7 +65,18 @@ fun resolveStageProgression(
         else -> maxUnlocked
     }
 
-    return StageProgression(currentStage = current, maxUnlockedStage = maxUnlocked)
+    // Calculate progress (dots logic)
+    // 5 dots total. Each dot = 1 level (10 points).
+    // Progress 1.0 means 5 levels gained in this stage beyond the minimum requirement.
+    val startLevel = stageRequirements.getValue(maxUnlocked).minLevel
+    val levelsIntoStage = (level - startLevel).coerceAtLeast(0)
+    val progress = (levelsIntoStage.toFloat() / 5f).coerceIn(0f, 1f)
+
+    return StageProgression(
+        currentStage = current,
+        maxUnlockedStage = maxUnlocked,
+        progressInCurrentStage = progress
+    )
 }
 
 fun requirementForStage(stage: TrainingStage): StageRequirement = stageRequirements.getValue(stage)

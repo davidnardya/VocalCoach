@@ -29,7 +29,7 @@ class StreakManagementUseCase(
     private var startupDone = false
 
     private val _milestoneBonusEvents = MutableSharedFlow<MilestoneBonus>(extraBufferCapacity = 1)
-    val milestoneBonusEvents: SharedFlow<StreakMilestoneEvent> = _milestoneBonusEvents.asSharedFlow()
+    val milestoneBonusEvents: SharedFlow<MilestoneBonus> = _milestoneBonusEvents.asSharedFlow()
 
     private val _levelUpCelebrations = MutableSharedFlow<LevelUpCelebration>(extraBufferCapacity = 1)
     val levelUpCelebrations: SharedFlow<LevelUpCelebration> = _levelUpCelebrations.asSharedFlow()
@@ -52,7 +52,7 @@ class StreakManagementUseCase(
         oldLevel: Int,
         newLevel: Int,
         todayStr: String,
-        totalScoreAfterGrowl: Long,
+        totalScoreAfterGrowl: Double,
     ): LevelUpProcessResult {
         require(newLevel > oldLevel)
 
@@ -77,7 +77,7 @@ class StreakManagementUseCase(
             streak += 1
             lastStreakInc = todayStr
             if (streak > 0 && streak % 25 == 0) {
-                total += 20L
+                total += 20.0
                 milestone = MilestoneBonus(streakCount = streak, bonusPoints = 20L)
             }
         }
@@ -114,16 +114,16 @@ class StreakManagementUseCase(
             }
 
             val penaltyDays = daysBetween - 1
-            val penalty = 5L * penaltyDays
-            val newScore = (rolled.totalScore - penalty).coerceAtLeast(0L)
-            val streakReset = newScore < 5L
+            val penalty = 5.0 * penaltyDays
+            val newScore = (rolled.totalScore - penalty).coerceAtLeast(0.0)
+            val streakReset = newScore < 5.0
             val newStreak = if (streakReset) 0 else rolled.streakCount
 
             result = PenaltyResult.Applied(
-                pointsDeducted = penalty,
+                pointsDeducted = penalty.toLong(),
                 streakReset = streakReset,
                 message = buildString {
-                    append("Missed days penalty: -$penalty points")
+                    append("Missed days penalty: -${penalty.toInt()} points")
                     if (streakReset) append(". Streak reset!")
                 },
             )
@@ -135,7 +135,7 @@ class StreakManagementUseCase(
 }
 
 data class LevelUpProcessResult(
-    val totalScore: Long,
+    val totalScore: Double,
     val streakCount: Int,
     val lastLevelUpDate: String?,
     val lastStreakIncrementDate: String?,

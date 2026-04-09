@@ -2,7 +2,11 @@ package org.davidnardya.vocalcoach.presentation.screens.game
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -97,7 +101,7 @@ fun AudioClassificationRoute(
         }
     }
 
-    LaunchedEffect(ui.levelUpCelebration, ui.isMilestoneLevelUp) {
+    LaunchedEffect(ui.levelUpCelebration) {
         if (ui.levelUpCelebration != null) {
             launch {
                 runScreenShake200Ms(shake)
@@ -183,9 +187,17 @@ private fun AudioClassificationScreen(
         label = "precision",
     )
 
-    val mult = ui.scoreMultiplier
-    val multHot = mult >= 2.0
-    val glowAlpha = if (multHot) 0.9f else 1f
+    val isHot = ui.scoreMultiplier > 1.0
+    val multiplierPulse = rememberInfiniteTransition(label = "multPulse")
+    val multScale by multiplierPulse.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "multScale",
+    )
 
     Scaffold(
         modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
@@ -228,7 +240,7 @@ private fun AudioClassificationScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
-                        if (multHot) {
+                        if (isHot) {
                             Icon(
                                 imageVector = Icons.Filled.LocalFireDepartment,
                                 contentDescription = null,
@@ -239,26 +251,26 @@ private fun AudioClassificationScreen(
                             )
                         }
                         Text(
-                            text = ui.totalScore.toString(),
+                            text = ui.totalScore.toInt().toString(),
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontSize = 80.sp,
                                 fontWeight = FontWeight.Black,
-                                color = if (multHot) {
-                                    ElectricOrange.copy(alpha = glowAlpha)
+                                color = if (isHot) {
+                                    ElectricOrange
                                 } else {
                                     MaterialTheme.colorScheme.primary
                                 },
                             ),
-                            modifier = if (multHot) {
+                            modifier = if (isHot) {
                                 Modifier.drawBehind {
                                     drawCircle(
                                         brush = Brush.radialGradient(
                                             colors = listOf(
-                                                ElectricOrange.copy(alpha = 0.4f * glowAlpha),
+                                                ElectricOrange.copy(alpha = 0.3f),
                                                 Color.Transparent,
                                             ),
                                             center = center,
-                                            radius = size.maxDimension * 0.55f,
+                                            radius = size.maxDimension * 0.6f,
                                         ),
                                     )
                                 }
@@ -272,30 +284,34 @@ private fun AudioClassificationScreen(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (multHot) {
-                        val multiplierLabel = when (mult) {
-                            3.0 -> "×3"
-                            2.0 -> "×2"
-                            else -> ""
-                        }
-                        if (multiplierLabel.isNotEmpty()) {
+                    
+                    if (isHot) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .graphicsLayer {
+                                    scaleX = multScale
+                                    scaleY = multScale
+                                }
+                                .background(BloodRed, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
                             Text(
-                                text = "$multiplierLabel MULTIPLIER",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = BloodRed,
-                                fontWeight = FontWeight.Black,
+                                text = "STREAK x${ui.scoreMultiplier}",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                    letterSpacing = 1.sp
+                                )
                             )
                         }
                     }
+
                     Text(
                         text = "Streak ${ui.streakCount}",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = "${ui.currentStage.title} / Unlocked: ${ui.maxUnlockedStage.title}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
                 }
 
@@ -325,13 +341,16 @@ private fun AudioClassificationScreen(
                             textAlign = TextAlign.Center,
                         )
                     }
-                    if (ui.currentStage.ordinal >= 1) {
-                        Text(
-                            text = "Combo ${ui.stageCombo}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                    
+                    Text(
+                        text = "Combo ${ui.stageCombo}",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Black,
+                            color = if (ui.stageCombo >= 6) IndustrialOrange else MaterialTheme.colorScheme.primary
+                        ),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
@@ -352,15 +371,6 @@ private fun AudioClassificationScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
-                    if (ui.top3Labels.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        ui.top3Labels.forEach { ls ->
-                            Text(
-                                text = "${ls.label}: ${(ls.score.safeUnitFloat() * 100).toInt()}%",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
 
                     Spacer(modifier = Modifier.height(40.dp))
 
@@ -388,15 +398,6 @@ private fun AudioClassificationScreen(
                             )
                         }
                     }
-
-                    ui.message?.let { msg ->
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = msg,
-                            color = MaterialTheme.colorScheme.error,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(48.dp))
@@ -404,6 +405,8 @@ private fun AudioClassificationScreen(
         }
     }
 }
+
+private val IndustrialOrange = Color(0xFFFF8F00)
 
 @Composable
 private fun RageMeterBar(

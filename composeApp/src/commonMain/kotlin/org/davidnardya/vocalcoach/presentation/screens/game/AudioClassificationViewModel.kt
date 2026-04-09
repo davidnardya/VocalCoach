@@ -29,11 +29,12 @@ import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.LevelUpCelebration
 import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
+import kotlin.math.floor
 
 data class AudioClassificationUiState(
     val isRecording: Boolean = false,
     val currentLabel: String = "—",
-    val totalScore: Long = 0L,
+    val totalScore: Double = 0.0,
     val currentLevel: Int = 1,
     val levelsGainedToday: Int = 0,
     val streakCount: Int = 0,
@@ -92,21 +93,26 @@ class AudioClassificationViewModel(
                 _levelUpCelebration.value = celebration
                 clearLevelUpOverlayJob?.cancel()
                 clearLevelUpOverlayJob = viewModelScope.launch {
-                    delay(1700)
+                    delay(2500) // Slightly longer to see the cool animation
                     _levelUpCelebration.value = null
                 }
             }
         }
     }
 
-    /** Current score multiplier from [ScoreRepository.getPlayerStats] → [CalculatePointsUseCase.computeMultiplier]. */
-    val multiplier: StateFlow<Double> = repository.getPlayerStats()
-        .map { stats -> calculatePointsUseCase.computeMultiplier(stats.levelsGainedToday) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 1.0,
-        )
+    /** Current score multiplier based on current combo and stage status. */
+    val multiplier: StateFlow<Double> = combine(
+        repository.getPlayerStats(),
+        _internalState.map { it.stageCombo }
+    ) { stats, combo ->
+        val progression = resolveStageProgression(stats.level, null)
+        val isPrevious = stage.ordinal < progression.maxUnlockedStage.ordinal
+        calculatePointsUseCase.getCurrentMultiplier(combo, isPrevious)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = 1.0,
+    )
 
     val state: StateFlow<AudioClassificationUiState> = combine(
         _internalState,
@@ -116,7 +122,6 @@ class AudioClassificationViewModel(
     ) { internal, stats, levelUpCelebration, mult ->
         val milestone = levelUpCelebration?.milestoneBonus
         val progression = resolveStageProgression(
-            totalScore = stats.totalScore,
             level = stats.level,
             preferredStage = stage,
         )
@@ -159,8 +164,7 @@ class AudioClassificationViewModel(
             return
         }
         if (_internalState.value.isRecording) {
-            audioUseCase.stop()
-            _internalState.update { it.copy(isRecording = false, message = null) }
+            stopRecordingAndTruncate()
             return
         }
         viewModelScope.launch {
@@ -203,6 +207,16 @@ class AudioClassificationViewModel(
         }
     }
 
+    private fun stopRecordingAndTruncate() {
+        audioUseCase.stop()
+        _internalState.update { it.copy(isRecording = false, message = null) }
+        viewModelScope.launch {
+            repository.updateStats { stats ->
+                stats.copy(totalScore = floor(stats.totalScore))
+            }
+        }
+    }
+
     fun onBackRequested() {
         if (_internalState.value.isRecording) {
             _internalState.update { it.copy(showExitConfirmation = true) }
@@ -211,6 +225,10 @@ class AudioClassificationViewModel(
 
     fun onDismissExitConfirmation() {
         _internalState.update { it.copy(showExitConfirmation = false) }
+    }
+
+    fun onConfirmExit() {
+        stopRecordingAndTruncate()
     }
 
     override fun onCleared() {
@@ -244,22 +262,56 @@ class AudioClassificationViewModel(
         )
         if (!result.shouldCountAttempt) return
 
-        val points = if (result.success) {
-            if (stage == TrainingStage.Stage1) 1L else 1L + result.bonusPoints
-        } else {
-            0L
-        }
-        if (points > 0L) {
+        if (result.success) {
+            var celebration: LevelUpCelebration? = null
             repository.updateStats { stats ->
                 val today = Clock.System.todayIn(TimeZone.currentSystemDefault())
+                val todayStr = today.toString()
                 val rolled = org.davidnardya.vocalcoach.domain.models.PlayerStats.withDayRollover(stats, today)
-                rolled.copy(totalScore = rolled.totalScore + points)
+                
+                val progression = resolveStageProgression(rolled.level, null)
+                val isPrevious = stage.ordinal < progression.maxUnlockedStage.ordinal
+                val points = calculatePointsUseCase.pointsForGrowl(
+                    comboBeforeHit = internal.stageCombo,
+                    isPreviousStage = isPrevious
+                )
+                
+                val total = rolled.totalScore + points
+                val oldLevel = rolled.level
+                val newLevel = org.davidnardya.vocalcoach.domain.models.PlayerStats.levelFromTotalScore(total)
+                
+                if (newLevel > oldLevel) {
+                    val r = streakManagementUseCase.processLevelUpBranch(
+                        rolled = rolled,
+                        oldLevel = oldLevel,
+                        newLevel = newLevel,
+                        todayStr = todayStr,
+                        totalScoreAfterGrowl = total
+                    )
+                    celebration = LevelUpCelebration(newLevel = newLevel, milestoneBonus = r.milestoneBonus)
+                    rolled.copy(
+                        totalScore = r.totalScore,
+                        streakCount = r.streakCount,
+                        lastLevelUpDate = r.lastLevelUpDate,
+                        lastStreakIncrementDate = r.lastStreakIncrementDate,
+                        levelsGainedToday = r.levelsGainedToday,
+                        levelsGainedForDate = r.levelsGainedForDate,
+                    )
+                } else {
+                    rolled.copy(totalScore = total)
+                }
+            }
+            celebration?.let { c ->
+                streakManagementUseCase.emitLevelUpCelebration(c)
+                c.milestoneBonus?.let { bonus ->
+                    streakManagementUseCase.emitMilestoneBonusForPresentation(bonus)
+                }
             }
         }
 
         _internalState.update {
             it.copy(
-                stageCombo = if (result.success) result.nextCombo else 0,
+                stageCombo = if (result.success) internal.stageCombo + 1 else 0,
                 stagePrompt = result.nextPrompt,
                 stageFeedback = result.feedback,
             )
@@ -270,10 +322,8 @@ class AudioClassificationViewModel(
 private data class StageEvalResult(
     val shouldCountAttempt: Boolean,
     val success: Boolean,
-    val nextCombo: Int,
     val nextPrompt: String,
     val feedback: String,
-    val bonusPoints: Long = 0L,
 )
 
 private fun evaluateStage(
@@ -290,23 +340,19 @@ private fun evaluateStage(
             StageEvalResult(
                 shouldCountAttempt = parsed.type != ModelLabelType.Background,
                 success = growlDetected,
-                nextCombo = 0,
                 nextPrompt = stagePromptFor(stage, 0),
-                feedback = if (growlDetected) "Success! +1" else "No growl detected (0)",
+                feedback = if (growlDetected) "Success!" else "No growl detected",
             )
         }
         TrainingStage.Stage2 -> {
             val target = nextTargetVowel(combo)
             val success = growlDetected && vowel == target
             val nextCombo = if (success) combo + 1 else 0
-            val bonus = if (success && nextCombo > 0 && nextCombo % 3 == 0) 1L else 0L
             StageEvalResult(
                 shouldCountAttempt = growlDetected,
                 success = success,
-                nextCombo = nextCombo,
                 nextPrompt = "Target vowel: ${nextTargetVowel(nextCombo).uppercaseChar()}",
-                feedback = if (success) "Correct vowel! +1${if (bonus > 0) " +$bonus streak bonus" else ""}" else "Missed target vowel",
-                bonusPoints = bonus,
+                feedback = if (success) "Correct vowel!" else "Missed target vowel",
             )
         }
         TrainingStage.Stage3 -> evaluatePhraseStage(
@@ -355,15 +401,12 @@ private fun evaluatePhraseStage(
     val current = targets[combo % targets.size]
     val success = growlDetected && vowel == current.second
     val nextCombo = if (success) combo + 1 else 0
-    val bonus = if (success && nextCombo > 0 && nextCombo % 4 == 0) 1L else 0L
     val nextTarget = targets[nextCombo % targets.size]
     return StageEvalResult(
         shouldCountAttempt = growlDetected,
         success = success,
-        nextCombo = nextCombo,
         nextPrompt = "Target $label: ${nextTarget.first}",
-        feedback = if (success) "Matched target! +1${if (bonus > 0) " +$bonus combo bonus" else ""}" else "Missed target $label",
-        bonusPoints = bonus,
+        feedback = if (success) "Matched target!" else "Missed target $label",
     )
 }
 
