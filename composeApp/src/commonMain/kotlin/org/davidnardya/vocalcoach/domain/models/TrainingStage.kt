@@ -50,14 +50,22 @@ private val stageRequirements: Map<TrainingStage, StageRequirement> = mapOf(
 fun resolveStageProgression(
     level: Int,
     preferredStage: TrainingStage?,
+    /** Developer boost: at least this stage stays unlocked for roadmap testing (max with level-based max). */
+    devMaxUnlockedBoost: TrainingStage? = null,
 ): StageProgression {
-    val maxUnlocked = TrainingStage.entries
+    val computedMax = TrainingStage.entries
         .filter { stage ->
             val requirement = stageRequirements.getValue(stage)
             level >= requirement.minLevel
         }
         .maxByOrNull { it.ordinal }
         ?: TrainingStage.Stage1
+
+    val maxUnlocked = if (devMaxUnlockedBoost != null) {
+        maxOf(computedMax, devMaxUnlockedBoost)
+    } else {
+        computedMax
+    }
 
     val current = when {
         preferredStage == null -> maxUnlocked

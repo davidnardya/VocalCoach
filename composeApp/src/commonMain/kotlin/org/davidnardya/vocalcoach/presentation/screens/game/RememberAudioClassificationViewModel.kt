@@ -3,9 +3,10 @@ package org.davidnardya.vocalcoach.presentation.screens.game
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.davidnardya.vocalcoach.domain.models.TrainingStage
+import org.davidnardya.vocalcoach.di.createAiVocalValidator
 import org.davidnardya.vocalcoach.di.createAudioClassificationUseCase
 import org.davidnardya.vocalcoach.di.createCalculatePointsUseCase
-import org.davidnardya.vocalcoach.di.createHandleGrowlDetectionUseCase
+import org.davidnardya.vocalcoach.di.createFileAudioRecorder
 import org.davidnardya.vocalcoach.di.createUpdateStreakUseCase
 import org.davidnardya.vocalcoach.di.createLevelTrackerUseCase
 import org.davidnardya.vocalcoach.di.createScoreRepository
@@ -18,13 +19,18 @@ fun rememberAudioClassificationViewModel(stage: TrainingStage): AudioClassificat
         val updateStreakUseCase = createUpdateStreakUseCase()
         AudioClassificationViewModel(
             stage = stage,
-            audioUseCase = createAudioClassificationUseCase(),
+            audioUseCase = createAudioClassificationUseCase(stage, versePcmCapture = null),
             repository = createScoreRepository(),
             levelTrackerUseCase = createLevelTrackerUseCase(),
-            handleGrowlDetectionUseCase = createHandleGrowlDetectionUseCase(streakManagement, updateStreakUseCase),
             calculatePointsUseCase = createCalculatePointsUseCase(),
             streakManagementUseCase = streakManagement,
             updateStreakUseCase = updateStreakUseCase,
+            fileAudioRecorder = createFileAudioRecorder(),
+            aiVocalValidator = if (stage.ordinal >= TrainingStage.Stage3.ordinal) {
+                createAiVocalValidator()
+            } else {
+                null
+            },
         )
     }
 }

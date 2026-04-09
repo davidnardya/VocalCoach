@@ -9,14 +9,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.davidnardya.vocalcoach.domain.models.ClassificationSnapshot
 import org.davidnardya.vocalcoach.domain.repository.AudioClassifier
-import org.davidnardya.vocalcoach.domain.repository.AudioRecorder
+import org.davidnardya.vocalcoach.domain.repository.PcmFrameAudioRecorder
 
 class AudioClassificationUseCase(
     private val classifier: AudioClassifier,
-    private val recorder: AudioRecorder,
+    private val recorder: PcmFrameAudioRecorder,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private var sessionJob: Job? = null
+
+    /** Sample rate of the loaded classifier (valid after [start] begins). */
+    private var lastInputSampleRateHz: Int = 16_000
+
+    fun lastInputSampleRateHz(): Int = lastInputSampleRateHz
 
     suspend fun start(
         scope: CoroutineScope,
@@ -28,7 +33,7 @@ class AudioClassificationUseCase(
             requireValidTfliteModelBytes(modelBytes)
             classifier.initialize(modelBytes)
         }
-        val rate = classifier.inputSampleRateHz()
+        val rate = classifier.inputSampleRateHz().also { lastInputSampleRateHz = it }
         val frameLen = classifier.requiredMonoPcmFrameLength()
         sessionJob = scope.launch(ioDispatcher) {
             try {

@@ -1,6 +1,9 @@
-package org.davidnardya.vocalcoach.domain
+package org.davidnardya.vocalcoach.domain.repository
 
-interface AudioRecorder {
+/**
+ * Mono PCM frame source for real-time classifiers (e.g. TFLite).
+ */
+interface PcmFrameAudioRecorder {
     val isRecording: Boolean
 
     fun start(sampleRateHz: Int, frameLengthInSamples: Int)

@@ -1,11 +1,17 @@
 package org.davidnardya.vocalcoach.domain.repository
 
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * Captures a single take to a local file for upload (e.g. Gemini multimodal).
+ */
 interface AudioRecorder {
-    val isRecording: Boolean
+    val isRecording: StateFlow<Boolean>
 
-    fun start(sampleRateHz: Int, frameLengthInSamples: Int)
+    fun startRecording()
 
-    fun stop()
-
-    suspend fun readMonoFrame(buffer: ShortArray): Int
+    /**
+     * Stops capture and returns the absolute path to the audio file, or null if nothing was recorded.
+     */
+    fun stopRecording(): String?
 }

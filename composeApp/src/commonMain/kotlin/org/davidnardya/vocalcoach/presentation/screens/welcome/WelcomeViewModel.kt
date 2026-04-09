@@ -8,7 +8,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.davidnardya.vocalcoach.domain.developer.DeveloperDebugSettings
 import org.davidnardya.vocalcoach.domain.models.PlayerStats
 import org.davidnardya.vocalcoach.domain.models.TrainingStage
 import org.davidnardya.vocalcoach.domain.models.requirementForStage
@@ -33,6 +35,10 @@ data class WelcomeRoadmapState(
     val items: List<StageRoadmapItem> = emptyList(),
 )
 
+data class WelcomeUiState(
+    val showDeveloperDialog: Boolean = false,
+)
+
 class WelcomeViewModel(
     private val repository: ScoreRepository,
     private val streakManagementUseCase: StreakManagementUseCase,
@@ -46,6 +52,9 @@ class WelcomeViewModel(
 
     private val _milestoneBonusMessage = MutableStateFlow<String?>(null)
     val milestoneBonusMessage: StateFlow<String?> = _milestoneBonusMessage.asStateFlow()
+
+    private val _uiState = MutableStateFlow(WelcomeUiState())
+    val uiState: StateFlow<WelcomeUiState> = _uiState.asStateFlow()
 
     val playerStats: StateFlow<PlayerStats?> = repository.getPlayerStats()
         .stateIn(
@@ -65,13 +74,15 @@ class WelcomeViewModel(
     val roadmapState: StateFlow<WelcomeRoadmapState> = combine(
         playerStats,
         _selectedStage,
-    ) { stats, selected ->
+        DeveloperDebugSettings.maxUnlockedStageBoost,
+    ) { stats, selected, devBoost ->
         if (stats == null) {
             return@combine WelcomeRoadmapState()
         }
         val progression = resolveStageProgression(
             level = stats.level,
             preferredStage = selected,
+            devMaxUnlockedBoost = devBoost,
         )
         val items = TrainingStage.entries.map { stage ->
             val isUnlocked = stage.ordinal <= progression.maxUnlockedStage.ordinal
@@ -129,6 +140,14 @@ class WelcomeViewModel(
         _selectedStage.value = stage
     }
 
+    fun onDeveloperMenuTriggered() {
+        _uiState.update { it.copy(showDeveloperDialog = true) }
+    }
+
+    fun onDismissDeveloperMenu() {
+        _uiState.update { it.copy(showDeveloperDialog = false) }
+    }
+
     /**
      * Developer override: sets score (level-derived minimum applies), level, and day streak.
      * Persists via [ScoreRepository] so UI updates immediately from [getPlayerStats] flow.
@@ -145,6 +164,7 @@ class WelcomeViewModel(
                 stats.copy(totalScore = effectiveScore)
             }
             updateStreakUseCase.applyManualStreakOverride(safeStreak)
+            _uiState.update { it.copy(showDeveloperDialog = false) }
         }
     }
 }

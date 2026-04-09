@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -7,7 +8,19 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.buildkonfig)
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+val geminiApiKey =
+    (localProperties.getProperty("GEMINI_API_KEY") ?: "")
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
 
 kotlin {
     androidTarget {
@@ -32,12 +45,16 @@ kotlin {
 
     sourceSets {
         androidMain.dependencies {
+            implementation(libs.ktor.client.android)
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.tensorflow.lite.task.audio)
             implementation(libs.androidx.work.runtime.ktx)
         }
         commonMain.dependencies {
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material)
@@ -60,19 +77,36 @@ kotlin {
         val iosArm64Main by getting {
             dependencies {
                 implementation(project(":tfliteInterop"))
+                implementation(libs.ktor.client.darwin)
             }
         }
         val iosSimulatorArm64Main by getting {
             dependencies {
                 implementation(project(":tfliteInterop"))
+                implementation(libs.ktor.client.darwin)
             }
         }
+    }
+}
+
+buildkonfig {
+    packageName = "org.davidnardya.vocalcoach"
+    defaultConfigs {
+        buildConfigField(
+            com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING,
+            "GEMINI_API_KEY",
+            geminiApiKey,
+        )
     }
 }
 
 android {
     namespace = "org.davidnardya.vocalcoach"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     defaultConfig {
         applicationId = "org.davidnardya.vocalcoach"

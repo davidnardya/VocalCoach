@@ -6,7 +6,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
-import org.davidnardya.vocalcoach.domain.repository.AudioRecorder
+import org.davidnardya.vocalcoach.domain.repository.PcmFrameAudioRecorder
 import org.davidnardya.vocalcoach.interop.vcaudio.vc_audio_sample
 import platform.AVFAudio.AVAudioEngine
 import platform.AVFAudio.AVAudioFrameCount
@@ -19,7 +19,7 @@ import platform.AVFAudio.setActive
 import kotlinx.coroutines.CancellationException
 
 @OptIn(ExperimentalForeignApi::class)
-class IosPcmAudioRecorder : AudioRecorder {
+class IosPcmAudioRecorder : PcmFrameAudioRecorder {
 
     private val sampleChannel = Channel<Short>(Channel.UNLIMITED)
 

@@ -35,9 +35,12 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,9 +50,11 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -68,11 +73,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.datetime.Clock
 import org.davidnardya.vocalcoach.core.util.PermissionManager
 import org.davidnardya.vocalcoach.di.createScoreRepository
 import org.davidnardya.vocalcoach.di.createStreakManagementUseCase
 import org.davidnardya.vocalcoach.di.createUpdateStreakUseCase
+import org.davidnardya.vocalcoach.domain.developer.DeveloperDebugSettings
 import org.davidnardya.vocalcoach.domain.models.TrainingStage
 
 private val MetalGray = Color(0xFF2C2C2C)
@@ -99,13 +104,14 @@ fun WelcomeScreen(
     val roadmap by viewModel.roadmapState.collectAsState()
     val penaltyMessage by viewModel.penaltyMessage.collectAsState()
     val milestoneBonusMessage by viewModel.milestoneBonusMessage.collectAsState()
+    val welcomeUiState by viewModel.uiState.collectAsState()
+    val showDeveloperDialog = welcomeUiState.showDeveloperDialog
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     var showOnboardingDialog by remember { mutableStateOf(false) }
-    var showDevDialog by remember { mutableStateOf(false) }
-    var titleTapCount by remember { mutableStateOf(0) }
-    var titleTapWindowStartMs by remember { mutableStateOf(0L) }
+    /** Local tap counter for the secret menu; visibility lives in [WelcomeUiState.showDeveloperDialog]. */
+    var tapCount by remember { mutableStateOf(0) }
     var devScoreInput by remember { mutableStateOf("") }
     var devLevelInput by remember { mutableStateOf("") }
     var devStreakInput by remember { mutableStateOf("") }
@@ -136,6 +142,14 @@ fun WelcomeScreen(
         val msg = milestoneBonusMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(msg)
         viewModel.consumeMilestoneBonusMessage()
+    }
+
+    LaunchedEffect(showDeveloperDialog) {
+        if (showDeveloperDialog) {
+            devScoreInput = (stats?.totalScore?.toLong() ?: 0L).toString()
+            devLevelInput = (stats?.level ?: 1).toString()
+            devStreakInput = currentStreak.toString()
+        }
     }
 
     if (triggerMic) {
@@ -183,53 +197,17 @@ fun WelcomeScreen(
         )
     }
 
-    if (showDevDialog) {
-        AlertDialog(
-            onDismissRequest = { },
-            title = { Text("DEVELOPER OVERRIDE", fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val numberKeyboard = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    OutlinedTextField(
-                        value = devScoreInput,
-                        onValueChange = { devScoreInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Score") },
-                        singleLine = true,
-                        keyboardOptions = numberKeyboard,
-                    )
-                    OutlinedTextField(
-                        value = devLevelInput,
-                        onValueChange = { devLevelInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Level") },
-                        singleLine = true,
-                        keyboardOptions = numberKeyboard,
-                    )
-                    OutlinedTextField(
-                        value = devStreakInput,
-                        onValueChange = { devStreakInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Day streak") },
-                        singleLine = true,
-                        keyboardOptions = numberKeyboard,
-                    )
-                }
-            },
-            confirmButton = {
-                Row {
-                    TextButton(onClick = { showDevDialog = false }) {
-                        Text("CLOSE")
-                    }
-                    TextButton(
-                        onClick = {
-                            val score = devScoreInput.toIntOrNull() ?: 0
-                            val level = devLevelInput.toIntOrNull() ?: 1
-                            val streak = devStreakInput.toIntOrNull() ?: 0
-                            viewModel.setTestProgress(score, level, streak)
-                            showDevDialog = false
-                        },
-                    ) {
-                        Text("APPLY")
-                    }
-                }
+    if (showDeveloperDialog) {
+        SecretDeveloperDialog(
+            devScoreInput = devScoreInput,
+            devLevelInput = devLevelInput,
+            devStreakInput = devStreakInput,
+            onDevScoreChange = { devScoreInput = it },
+            onDevLevelChange = { devLevelInput = it },
+            onDevStreakChange = { devStreakInput = it },
+            onDismiss = viewModel::onDismissDeveloperMenu,
+            onApplyProgress = { score, level, streak ->
+                viewModel.setTestProgress(score, level, streak)
             },
         )
     }
@@ -251,30 +229,27 @@ fun WelcomeScreen(
         topBar = {
             TopAppBar(
                 title = {
+                    val titleInteractionSource = remember { MutableInteractionSource() }
                     Text(
                         "METAL VOCAL COACH",
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Black,
                             letterSpacing = 2.sp
                         ),
-                        modifier = Modifier.clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) {
-                            val now = Clock.System.now().toEpochMilliseconds()
-                            if (titleTapWindowStartMs == 0L || now - titleTapWindowStartMs > 6000L) {
-                                titleTapWindowStartMs = now
-                                titleTapCount = 0
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                indication = null,
+                                interactionSource = titleInteractionSource,
+                            ) {
+                                tapCount += 1
+                                println("[WelcomeScreen] secret dev tapCount=$tapCount/20")
+                                if (tapCount == 20) {
+                                    viewModel.onDeveloperMenuTriggered()
+                                    tapCount = 0
+                                }
                             }
-                            titleTapCount += 1
-                            if (titleTapCount >= 20) {
-                                showDevDialog = true
-                                titleTapCount = 0
-                                devScoreInput = (stats?.totalScore?.toLong() ?: 0L).toString()
-                                devLevelInput = (stats?.level ?: 1).toString()
-                                devStreakInput = currentStreak.toString()
-                            }
-                        },
+                            .padding(vertical = 8.dp),
                     )
                 },
                 actions = {
@@ -390,6 +365,185 @@ fun WelcomeScreen(
                     style = MaterialTheme.typography.labelSmall
                 )
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
+            Text(
+                text = "v1.0.0",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Gray.copy(alpha = 0.35f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SecretDeveloperDialog(
+    devScoreInput: String,
+    devLevelInput: String,
+    devStreakInput: String,
+    onDevScoreChange: (String) -> Unit,
+    onDevLevelChange: (String) -> Unit,
+    onDevStreakChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onApplyProgress: (score: Int, level: Int, streak: Int) -> Unit,
+) {
+    val stageBoost by DeveloperDebugSettings.maxUnlockedStageBoost.collectAsState()
+    val mockGemini by DeveloperDebugSettings.mockGeminiSuccess.collectAsState()
+    val numberKeyboard = KeyboardOptions(keyboardType = KeyboardType.Number)
+    val scroll = rememberScrollState()
+
+    Dialog(
+        onDismissRequest = { },
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+            ) {
+                Text("SECRET DEVELOPER", fontWeight = FontWeight.Black)
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(scroll),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "Max unlocked stage (Stages 3–5)",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Applies immediately to the roadmap and arena (tiered scoring). Uses max(level, boost).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        StageBoostChip(
+                            label = "Auto",
+                            selected = stageBoost == null,
+                            onClick = { DeveloperDebugSettings.setMaxUnlockedStageBoost(null) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StageBoostChip(
+                            label = "3",
+                            selected = stageBoost == TrainingStage.Stage3,
+                            onClick = { DeveloperDebugSettings.setMaxUnlockedStageBoost(TrainingStage.Stage3) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StageBoostChip(
+                            label = "4",
+                            selected = stageBoost == TrainingStage.Stage4,
+                            onClick = { DeveloperDebugSettings.setMaxUnlockedStageBoost(TrainingStage.Stage4) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StageBoostChip(
+                            label = "5",
+                            selected = stageBoost == TrainingStage.Stage5,
+                            onClick = { DeveloperDebugSettings.setMaxUnlockedStageBoost(TrainingStage.Stage5) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Mock Gemini success", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "No network — hardcoded successful JSON.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray,
+                            )
+                        }
+                        Switch(
+                            checked = mockGemini,
+                            onCheckedChange = { DeveloperDebugSettings.setMockGeminiSuccess(it) },
+                        )
+                    }
+
+                    Text(
+                        "Score / level / streak",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    OutlinedTextField(
+                        value = devScoreInput,
+                        onValueChange = { onDevScoreChange(it.filter { ch -> ch.isDigit() }) },
+                        label = { Text("Score") },
+                        singleLine = true,
+                        keyboardOptions = numberKeyboard,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = devLevelInput,
+                        onValueChange = { onDevLevelChange(it.filter { ch -> ch.isDigit() }) },
+                        label = { Text("Level") },
+                        singleLine = true,
+                        keyboardOptions = numberKeyboard,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = devStreakInput,
+                        onValueChange = { onDevStreakChange(it.filter { ch -> ch.isDigit() }) },
+                        label = { Text("Day streak") },
+                        singleLine = true,
+                        keyboardOptions = numberKeyboard,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                    TextButton(
+                        onClick = {
+                            val score = devScoreInput.toIntOrNull() ?: 0
+                            val level = devLevelInput.toIntOrNull() ?: 1
+                            val streak = devStreakInput.toIntOrNull() ?: 0
+                            onApplyProgress(score, level, streak)
+                        },
+                    ) {
+                        Text("APPLY PROGRESS")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StageBoostChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (selected) {
+        FilledTonalButton(onClick = onClick, modifier = modifier) {
+            Text(label, maxLines = 1)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = modifier) {
+            Text(label, maxLines = 1)
         }
     }
 }

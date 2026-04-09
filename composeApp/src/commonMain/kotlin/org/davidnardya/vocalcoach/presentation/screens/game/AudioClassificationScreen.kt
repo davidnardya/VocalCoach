@@ -1,15 +1,15 @@
 package org.davidnardya.vocalcoach.presentation.screens.game
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,17 +23,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -42,11 +50,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -56,18 +67,23 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.davidnardya.vocalcoach.core.util.PlatformBackHandler
+import org.davidnardya.vocalcoach.core.util.playRecordingArmCue
 import org.davidnardya.vocalcoach.core.util.rememberMicrophonePermissionState
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import vocalcoach.composeapp.generated.resources.Res
 import kotlin.math.floor
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 private const val MODEL_RESOURCE_PATH = "files/soundclassifier_with_metadata.tflite"
 
@@ -79,7 +95,41 @@ private fun formatScoreForDisplay(value: Double): String {
     return if (frac == 0) whole.toString() else "$whole.$frac"
 }
 
+/** UI-only: separates critique text from the appended growl-technique suffix from the ViewModel. */
+private fun stripGrowlTechniqueSuffix(feedback: String): String =
+    feedback
+        .replace(Regex("""\s*\(growl technique \d+%\)\s*$"""), "")
+        .replace(Regex("""\s*\(technique: [^)]+\)\s*$"""), "")
+        .trim()
+
+/**
+ * Teaser: first two newline-separated lines, or a capped prefix when Gemini returns one long paragraph.
+ */
+private fun feedbackTeaserTwoLines(full: String, singleLineCap: Int = 140): String {
+    val t = full.replace("\r\n", "\n").trim()
+    if (t.isEmpty()) return ""
+    val lines = t.lines()
+    return when {
+        lines.size >= 2 -> lines.take(2).joinToString("\n")
+        lines.size == 1 && lines[0].length > singleLineCap ->
+            lines[0].take(singleLineCap).trim() + "…"
+        else -> t
+    }
+}
+
+private fun teaserIsShorterThanFull(teaser: String, full: String): Boolean =
+    full.isNotEmpty() && teaser != full.trim()
+
+/** KMP-safe display for technical score in 0.00–1.00 form (matches Gemini `technical_score`). */
+private fun formatTechnicalScore01Text(unit: Double): String {
+    val bps = (unit.coerceIn(0.0, 1.0) * 100.0).roundToInt().coerceIn(0, 100)
+    val whole = bps / 100
+    val frac = bps % 100
+    return "$whole.${frac.toString().padStart(2, '0')}"
+}
+
 private val ElectricOrange = Color(0xFFFF8F00)
+private val IndustrialOrange = Color(0xFFFF8F00)
 private val BloodRed = Color(0xFFB22222)
 private val Gold = Color(0xFFFFD700)
 
@@ -95,7 +145,12 @@ fun AudioClassificationRoute(
 
     val shake = remember { Animatable(0f) }
 
-    PlatformBackHandler(enabled = ui.isRecording) {
+    val blockBack =
+        ui.isRecording ||
+            ui.processingState == ProcessingState.ANALYZING ||
+            ui.processingState == ProcessingState.RECORDING ||
+            ui.processingState == ProcessingState.PREPARING
+    PlatformBackHandler(enabled = blockBack) {
         viewModel.onBackRequested()
     }
 
@@ -143,7 +198,7 @@ fun AudioClassificationRoute(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AudioClassificationScreen(
+        GameScreen(
             modifier = Modifier
                 .graphicsLayer { translationX = shake.value },
             ui = ui,
@@ -153,8 +208,15 @@ fun AudioClassificationRoute(
             onStartStop = {
                 viewModel.onStartStopClicked(mic.isGranted) { Res.readBytes(MODEL_RESOURCE_PATH) }
             },
+            onRecordingPressChanged = { pressed ->
+                viewModel.onRecordingPressChanged(pressed, mic.isGranted)
+            },
             onBack = {
-                if (ui.isRecording) {
+                if (
+                    ui.isRecording ||
+                        ui.processingState == ProcessingState.ANALYZING ||
+                        ui.processingState == ProcessingState.PREPARING
+                ) {
                     viewModel.onBackRequested()
                 } else {
                     onBack()
@@ -179,36 +241,23 @@ fun AudioClassificationRoute(
     }
 }
 
+/**
+ * Arena layout: live meters / target stay pinned; prompts and Gemini feedback scroll.
+ * Audio capture and TFLite run in the ViewModel / platform layer — scrolling only affects Compose layout.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AudioClassificationScreen(
+fun GameScreen(
     ui: AudioClassificationUiState,
     micGranted: Boolean,
     snackbarHostState: SnackbarHostState,
     onRequestMic: () -> Unit,
     onStartStop: () -> Unit,
+    onRecordingPressChanged: (pressed: Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isGrowl = ui.currentLabel.contains("Growl", ignoreCase = true)
-    val precision by animateFloatAsState(
-        targetValue = ui.precisionScore.safeUnitFloat(),
-        animationSpec = tween(280, easing = LinearEasing),
-        label = "precision",
-    )
-
-    val isHot = ui.scoreMultiplier > 1.0
-    val multiplierPulse = rememberInfiniteTransition(label = "multPulse")
-    val multScale by multiplierPulse.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "multScale",
-    )
-
+    val scrollState = rememberScrollState()
     Scaffold(
         modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -228,6 +277,16 @@ private fun AudioClassificationScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
+        bottomBar = {
+            if (ui.validationMode == ValidationMode.REAL_TIME) {
+                GameScreenBottomBar(
+                    ui = ui,
+                    micGranted = micGranted,
+                    onRequestMic = onRequestMic,
+                    onStartStop = onStartStop,
+                )
+            }
+        },
     ) { padding ->
         Surface(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -236,187 +295,857 @@ private fun AudioClassificationScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
+                    .padding(horizontal = 24.dp)
+                    .padding(top = 8.dp, bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "LEVEL ${ui.currentLevel}",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        if (isHot) {
-                            Icon(
-                                imageVector = Icons.Filled.LocalFireDepartment,
-                                contentDescription = null,
-                                tint = ElectricOrange,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .padding(end = 4.dp),
-                            )
+                GameScoreHeader(ui = ui)
+                when (ui.validationMode) {
+                    ValidationMode.REAL_TIME -> {
+                        PinnedRealTimeLiveSection(ui = ui)
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            RealTimeScrollableSection(ui = ui)
                         }
-                        Text(
-                            text = formatScoreForDisplay(ui.totalScore),
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = 80.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (isHot) {
-                                    ElectricOrange
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                            ),
-                            modifier = if (isHot) {
-                                Modifier.drawBehind {
-                                    drawCircle(
-                                        brush = Brush.radialGradient(
-                                            colors = listOf(
-                                                ElectricOrange.copy(alpha = 0.3f),
-                                                Color.Transparent,
-                                            ),
-                                            center = center,
-                                            radius = size.maxDimension * 0.6f,
-                                        ),
-                                    )
-                                }
-                            } else {
-                                Modifier
-                            },
+                    }
+                    ValidationMode.RECORDING -> {
+                        RecordingStageLayout(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            ui = ui,
+                            micGranted = micGranted,
+                            onRequestMic = onRequestMic,
+                            onStartStop = onStartStop,
+                            onRecordingPressChanged = onRecordingPressChanged,
                         )
                     }
-                    Text(
-                        text = "TOTAL SCORE",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    
-                    if (isHot) {
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 8.dp)
-                                .graphicsLayer {
-                                    scaleX = multScale
-                                    scaleY = multScale
-                                }
-                                .background(BloodRed, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "NEXT +${formatScoreForDisplay(ui.scoreMultiplier)}",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Black,
-                                    color = Color.White,
-                                    letterSpacing = 1.sp
-                                )
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "Streak ${ui.streakCount}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
                 }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = "PRECISION METER",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    RageMeterBar(progress = precision, modifier = Modifier.fillMaxWidth(0.92f))
-
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = ui.stagePrompt,
-                        style = MaterialTheme.typography.titleMedium,
-                        textAlign = TextAlign.Center,
-                    )
-                    ui.stageFeedback?.let { feedback ->
-                        Text(
-                            text = feedback,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.secondary,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                    
-                    Text(
-                        text = "Hot streak ${ui.currentHotStreak}",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Black,
-                            color = if (ui.currentHotStreak >= 6) IndustrialOrange else MaterialTheme.colorScheme.primary
-                        ),
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Vocal Status",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = when {
-                            isGrowl -> "GROWL!"
-                            ui.isRecording -> "Clean"
-                            else -> "Idling"
-                        },
-                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Black),
-                        color = if (isGrowl) BloodRed else MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Heard: ${ui.currentLabel} (${(ui.precisionScore.safeUnitFloat() * 100).toInt()}%)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-
-                    Spacer(modifier = Modifier.height(40.dp))
-
-                    if (!micGranted) {
-                        Button(onClick = onRequestMic) {
-                            Text("Grant Microphone Access")
-                        }
-                    } else {
-                        Button(
-                            onClick = onStartStop,
-                            modifier = Modifier
-                                .fillMaxWidth(0.7f)
-                                .height(64.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = if (ui.isRecording) {
-                                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                            } else {
-                                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                            },
-                        ) {
-                            Text(
-                                text = if (ui.isRecording) "STOP" else "START",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }
 }
 
-private val IndustrialOrange = Color(0xFFFF8F00)
+@Composable
+private fun GameScreenBottomBar(
+    ui: AudioClassificationUiState,
+    micGranted: Boolean,
+    onRequestMic: () -> Unit,
+    onStartStop: () -> Unit,
+) {
+    Surface(
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(top = 12.dp, bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            MicPrimaryButton(
+                micGranted = micGranted,
+                onRequestMic = onRequestMic,
+                onStartStop = onStartStop,
+                isRecording = ui.isRecording,
+                analyzing = false,
+                validationMode = ValidationMode.REAL_TIME,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PinnedRealTimeLiveSection(ui: AudioClassificationUiState) {
+    val isGrowl = ui.currentLabel.contains("Growl", ignoreCase = true)
+    val precision by animateFloatAsState(
+        targetValue = ui.precisionScore.safeUnitFloat(),
+        animationSpec = tween(280, easing = LinearEasing),
+        label = "precision",
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "VOCAL METER",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        RageMeterBar(progress = precision, modifier = Modifier.fillMaxWidth(0.92f))
+        Text(
+            text = when {
+                isGrowl -> "GROWL!"
+                ui.isRecording -> "Listening…"
+                else -> "Ready"
+            },
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
+            color = if (isGrowl) BloodRed else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun RealTimeScrollableSection(ui: AudioClassificationUiState) {
+    Text(
+        text = ui.stagePrompt,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        textAlign = TextAlign.Center,
+    )
+    ui.stageFeedback?.let { feedback ->
+        Text(
+            text = feedback,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.secondary,
+            textAlign = TextAlign.Center,
+        )
+    }
+    ui.message?.let { err ->
+        Text(
+            text = err,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            textAlign = TextAlign.Center,
+        )
+    }
+    TechnicalStatsExpandable(ui = ui)
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+/**
+ * Target + prep status stay fixed; only coach feedback / technical stats scroll so the target
+ * is never pushed off-screen. Mic actions stay pinned below the feedback scroll area.
+ */
+@Composable
+private fun RecordingStageLayout(
+    ui: AudioClassificationUiState,
+    micGranted: Boolean,
+    onRequestMic: () -> Unit,
+    onStartStop: () -> Unit,
+    onRecordingPressChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isAnalyzing = ui.processingState == ProcessingState.ANALYZING
+    val targetText = ui.targetLyrics.ifBlank { ui.stagePrompt }
+    val feedbackScroll = rememberScrollState()
+
+    LaunchedEffect(ui.stageFeedback) {
+        val feedback = ui.stageFeedback
+        if (feedback.isNullOrBlank()) return@LaunchedEffect
+        repeat(2) { attempt ->
+            delay(if (attempt == 0) 48 else 120)
+            val max = feedbackScroll.maxValue
+            if (max > 0) {
+                feedbackScroll.scrollTo(max)
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TargetLyricsCard(targetText = targetText)
+        if (isAnalyzing) {
+            TargetAnalyzingIndicator()
+        }
+        RecordingPrepAndMicStatus(ui = ui)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(feedbackScroll),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            RecordingScrollableSection(ui = ui)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        if (!micGranted) {
+            Button(
+                onClick = onRequestMic,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Grant Microphone Access")
+            }
+        } else {
+            RecordingActionButtonRow(
+                ui = ui,
+                onStartStop = onStartStop,
+                onRecordingPressChanged = onRecordingPressChanged,
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun TargetAnalyzingIndicator() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp),
+            color = ElectricOrange,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
+        Text(
+            text = "AI is thinking…",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.secondary,
+        )
+    }
+}
+
+@Composable
+private fun RecordingPrepAndMicStatus(ui: AudioClassificationUiState) {
+    val preparing = ui.processingState == ProcessingState.PREPARING
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (preparing) {
+            Text(
+                text = "GET READY…",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                color = Gold,
+            )
+        }
+        if (ui.micLive) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = BloodRed.copy(alpha = 0.18f),
+                border = BorderStroke(1.dp, BloodRed.copy(alpha = 0.6f)),
+            ) {
+                Text(
+                    text = "MIC ON",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
+                    color = BloodRed,
+                    letterSpacing = 2.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TargetLyricsCard(
+    targetText: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primary,
+        tonalElevation = 2.dp,
+        shadowElevation = 3.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.35f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "YOUR TARGET",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
+                letterSpacing = 2.sp,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = targetText,
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    lineHeight = 32.sp,
+                ),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordingActionButtonRow(
+    ui: AudioClassificationUiState,
+    onStartStop: () -> Unit,
+    onRecordingPressChanged: (Boolean) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    val analyzing = ui.processingState == ProcessingState.ANALYZING
+    val preparing = ui.processingState == ProcessingState.PREPARING
+    val micLive = ui.micLive
+    val holdInteraction = remember { MutableInteractionSource() }
+    val holdPressed by holdInteraction.collectIsPressedAsState()
+
+    LaunchedEffect(holdPressed) {
+        if (holdPressed && !analyzing) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            playRecordingArmCue()
+        }
+        onRecordingPressChanged(holdPressed)
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val holdContainer = when {
+            preparing -> Gold
+            micLive && holdPressed -> MaterialTheme.colorScheme.error
+            micLive -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.primary
+        }
+        val holdContent = when {
+            preparing -> Color.Black.copy(alpha = 0.88f)
+            micLive -> MaterialTheme.colorScheme.onError
+            else -> MaterialTheme.colorScheme.onPrimary
+        }
+        val holdLabel = when {
+            micLive && holdPressed -> "Release"
+            preparing -> "Wait"
+            else -> "Hold"
+        }
+        Button(
+            onClick = {},
+            enabled = !analyzing,
+            interactionSource = holdInteraction,
+            modifier = Modifier
+                .weight(1f)
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = holdContainer,
+                contentColor = holdContent,
+            ),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    text = holdLabel,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black),
+                    maxLines = 1,
+                )
+            }
+        }
+        val tapTitle = when {
+            analyzing -> "Wait"
+            micLive -> "Stop"
+            preparing -> "Cancel"
+            else -> "Tap"
+        }
+        val tapSubtitle = when {
+            analyzing -> "analyzing"
+            micLive -> "tap to stop"
+            preparing -> "countdown"
+            else -> "to record"
+        }
+        val tapBorder = if (preparing) Gold else MaterialTheme.colorScheme.primary
+        OutlinedButton(
+            onClick = {
+                if (
+                    ui.processingState == ProcessingState.IDLE &&
+                    !micLive &&
+                    !analyzing
+                ) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    playRecordingArmCue()
+                }
+                onStartStop()
+            },
+            enabled = !analyzing,
+            modifier = Modifier
+                .weight(1f)
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(2.dp, tapBorder),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = if (preparing) Gold else MaterialTheme.colorScheme.primary,
+            ),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = tapTitle,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black),
+                    maxLines = 1,
+                )
+                Text(
+                    text = tapSubtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordingScrollableSection(ui: AudioClassificationUiState) {
+    val analyzing = ui.processingState == ProcessingState.ANALYZING
+    if (!analyzing && ui.stageFeedback != null) {
+        FeedbackSection(
+            fullFeedback = ui.stageFeedback!!,
+            technicalScorePercent = ui.lastAccuracyScore,
+        )
+    }
+    ui.message?.let { err ->
+        Text(
+            text = err,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            textAlign = TextAlign.Center,
+        )
+    }
+    TechnicalStatsExpandable(ui = ui)
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
+private fun GameScoreHeader(ui: AudioClassificationUiState) {
+    val isHot = ui.scoreMultiplier > 1.0
+    val hotSession = ui.currentHotStreak > 0
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = "STAGE",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 2.sp,
+        )
+        Text(
+            text = ui.currentStage.title,
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black),
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+        )
+
+        Text(
+            text = "SCORE",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 2.sp,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (isHot) {
+                Icon(
+                    imageVector = Icons.Filled.LocalFireDepartment,
+                    contentDescription = null,
+                    tint = ElectricOrange,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(end = 4.dp),
+                )
+            }
+            Text(
+                text = formatScoreForDisplay(ui.totalScore),
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 72.sp,
+                    lineHeight = 76.sp,
+                    fontWeight = FontWeight.Black,
+                    color = if (isHot) ElectricOrange else MaterialTheme.colorScheme.primary,
+                ),
+                modifier = if (isHot) {
+                    Modifier.drawBehind {
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    ElectricOrange.copy(alpha = 0.28f),
+                                    Color.Transparent,
+                                ),
+                                center = center,
+                                radius = size.maxDimension * 0.55f,
+                            ),
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            )
+        }
+
+        Text(
+            text = "HOT STREAK",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 2.sp,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (hotSession) {
+                Icon(
+                    imageVector = Icons.Filled.LocalFireDepartment,
+                    contentDescription = null,
+                    tint = if (ui.currentHotStreak >= 6) IndustrialOrange else ElectricOrange,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .padding(end = 6.dp),
+                )
+            }
+            Text(
+                text = "${ui.currentHotStreak}",
+                style = MaterialTheme.typography.displayMedium.copy(
+                    fontSize = 64.sp,
+                    lineHeight = 68.sp,
+                    fontWeight = FontWeight.Black,
+                ),
+                color = when {
+                    ui.currentHotStreak >= 6 -> IndustrialOrange
+                    hotSession -> ElectricOrange
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TechnicalStatsExpandable(ui: AudioClassificationUiState) {
+    var expanded by remember { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+        ) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Technical stats",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (ui.validationMode) {
+                        ValidationMode.REAL_TIME -> {
+                            StatLine(
+                                label = "Top label",
+                                value = ui.currentLabel,
+                            )
+                            StatLine(
+                                label = "Growl confidence",
+                                value = "${(ui.precisionScore.safeUnitFloat() * 100).toInt()}%",
+                            )
+                            if (ui.top3Labels.isNotEmpty()) {
+                                Text(
+                                    text = "Model probabilities",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                ui.top3Labels.forEach { ls ->
+                                    Text(
+                                        text = "· ${ls.label}: ${(ls.score.coerceIn(0f, 1f) * 100f).toInt()}%",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            StatLine(label = "Player level", value = "${ui.currentLevel}")
+                            StatLine(label = "Day streak", value = "${ui.streakCount}")
+                            StatLine(
+                                label = "Score multiplier",
+                                value = formatScoreForDisplay(ui.scoreMultiplier) + "×",
+                            )
+                            if (ui.scoreMultiplier > 1.0) {
+                                Text(
+                                    text = "Next hit bonus +${formatScoreForDisplay(ui.scoreMultiplier)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = BloodRed,
+                                )
+                            }
+                        }
+                        ValidationMode.RECORDING -> {
+                            StatLine(label = "Player level", value = "${ui.currentLevel}")
+                            StatLine(label = "Day streak", value = "${ui.streakCount}")
+                            StatLine(label = "Arena combo", value = "${ui.stageCombo}")
+                            ui.lastAccuracyScore?.let { acc ->
+                                StatLine(
+                                    label = "Last growl technique",
+                                    value = "${acc.toInt()}%",
+                                )
+                            }
+                            StatLine(
+                                label = "Session state",
+                                value = ui.processingState.name,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatLine(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FeedbackSection(
+    fullFeedback: String,
+    technicalScorePercent: Double?,
+    modifier: Modifier = Modifier,
+) {
+    var isFeedbackExpanded by remember { mutableStateOf(false) }
+    var showFeedbackSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    LaunchedEffect(fullFeedback) {
+        isFeedbackExpanded = false
+        showFeedbackSheet = false
+    }
+
+    val critiqueBody = remember(fullFeedback) {
+        stripGrowlTechniqueSuffix(fullFeedback).ifBlank { fullFeedback }
+    }
+    val teaserText = remember(critiqueBody) { feedbackTeaserTwoLines(critiqueBody) }
+    val hasMoreInCard = remember(critiqueBody, teaserText) {
+        teaserIsShorterThanFull(teaserText, critiqueBody)
+    }
+
+    val technical01 = remember(technicalScorePercent) {
+        technicalScorePercent?.takeIf { it.isFinite() }?.div(100.0)?.coerceIn(0.0, 1.0)
+    }
+
+    if (showFeedbackSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showFeedbackSheet = false },
+            sheetState = sheetState,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 28.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    text = "COACH — FULL CRITIQUE",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.sp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = critiqueBody,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Button(
+                    onClick = { showFeedbackSheet = false },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Back to Training")
+                }
+            }
+        }
+    }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        tonalElevation = 3.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(20.dp)
+                .animateContentSize(),
+        ) {
+            Text(
+                text = "COACH",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                letterSpacing = 2.sp,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            technical01?.let { t ->
+                Text(
+                    text = "Technical score: ${formatTechnicalScore01Text(t)} (${(t * 100).toInt()}%)",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                    color = ElectricOrange,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            Text(
+                text = if (isFeedbackExpanded) critiqueBody else teaserText,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            if (hasMoreInCard) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { isFeedbackExpanded = !isFeedbackExpanded },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(if (isFeedbackExpanded) "See less" else "See more")
+                        Icon(
+                            imageVector = if (isFeedbackExpanded) {
+                                Icons.Filled.KeyboardArrowUp
+                            } else {
+                                Icons.Filled.KeyboardArrowDown
+                            },
+                            contentDescription = null,
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = { showFeedbackSheet = true },
+                    modifier = Modifier.align(Alignment.Start),
+                ) {
+                    Text("Full critique")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MicPrimaryButton(
+    micGranted: Boolean,
+    onRequestMic: () -> Unit,
+    onStartStop: () -> Unit,
+    isRecording: Boolean,
+    analyzing: Boolean,
+    validationMode: ValidationMode,
+    outlined: Boolean = false,
+) {
+    if (!micGranted) {
+        Button(onClick = onRequestMic) {
+            Text("Grant Microphone Access")
+        }
+        return
+    }
+    val label = when {
+        analyzing -> "ANALYZING…"
+        isRecording -> "STOP"
+        validationMode == ValidationMode.RECORDING -> "START RECORDING"
+        else -> "START"
+    }
+    val content: @Composable () -> Unit = {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Black,
+        )
+    }
+    if (outlined) {
+        OutlinedButton(
+            onClick = onStartStop,
+            enabled = !analyzing,
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(56.dp),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            content()
+        }
+    } else {
+        Button(
+            onClick = onStartStop,
+            enabled = !analyzing,
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(64.dp),
+            shape = RoundedCornerShape(8.dp),
+            colors = if (isRecording) {
+                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            } else {
+                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            },
+        ) {
+            content()
+        }
+    }
+}
 
 @Composable
 private fun RageMeterBar(

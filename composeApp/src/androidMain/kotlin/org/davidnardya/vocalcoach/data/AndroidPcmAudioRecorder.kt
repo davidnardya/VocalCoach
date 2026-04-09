@@ -7,10 +7,10 @@ import android.media.MediaRecorder
 import androidx.annotation.RequiresPermission
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.davidnardya.vocalcoach.domain.repository.AudioRecorder
+import org.davidnardya.vocalcoach.domain.repository.PcmFrameAudioRecorder
 import kotlin.math.max
 
-class AndroidPcmAudioRecorder : AudioRecorder {
+class AndroidPcmAudioRecorder : PcmFrameAudioRecorder {
 
     @Volatile
     private var recording: Boolean = false
