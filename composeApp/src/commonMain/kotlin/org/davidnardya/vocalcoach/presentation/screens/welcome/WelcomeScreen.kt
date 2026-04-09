@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -37,6 +38,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +48,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -59,6 +60,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -70,6 +72,7 @@ import kotlinx.datetime.Clock
 import org.davidnardya.vocalcoach.core.util.PermissionManager
 import org.davidnardya.vocalcoach.di.createScoreRepository
 import org.davidnardya.vocalcoach.di.createStreakManagementUseCase
+import org.davidnardya.vocalcoach.di.createUpdateStreakUseCase
 import org.davidnardya.vocalcoach.domain.models.TrainingStage
 
 private val MetalGray = Color(0xFF2C2C2C)
@@ -87,10 +90,12 @@ fun WelcomeScreen(
         WelcomeViewModel(
             createScoreRepository(),
             createStreakManagementUseCase(),
+            createUpdateStreakUseCase(),
         )
     },
 ) {
     val stats by viewModel.playerStats.collectAsState()
+    val currentStreak by viewModel.currentStreak.collectAsState()
     val roadmap by viewModel.roadmapState.collectAsState()
     val penaltyMessage by viewModel.penaltyMessage.collectAsState()
     val milestoneBonusMessage by viewModel.milestoneBonusMessage.collectAsState()
@@ -103,6 +108,7 @@ fun WelcomeScreen(
     var titleTapWindowStartMs by remember { mutableStateOf(0L) }
     var devScoreInput by remember { mutableStateOf("") }
     var devLevelInput by remember { mutableStateOf("") }
+    var devStreakInput by remember { mutableStateOf("") }
     var triggerMic by remember { mutableStateOf(false) }
     var triggerNotif by remember { mutableStateOf(false) }
 
@@ -183,17 +189,27 @@ fun WelcomeScreen(
             title = { Text("DEVELOPER OVERRIDE", fontWeight = FontWeight.Black) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextField(
+                    val numberKeyboard = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    OutlinedTextField(
                         value = devScoreInput,
                         onValueChange = { devScoreInput = it.filter { ch -> ch.isDigit() } },
                         label = { Text("Score") },
                         singleLine = true,
+                        keyboardOptions = numberKeyboard,
                     )
-                    TextField(
+                    OutlinedTextField(
                         value = devLevelInput,
                         onValueChange = { devLevelInput = it.filter { ch -> ch.isDigit() } },
                         label = { Text("Level") },
                         singleLine = true,
+                        keyboardOptions = numberKeyboard,
+                    )
+                    OutlinedTextField(
+                        value = devStreakInput,
+                        onValueChange = { devStreakInput = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Day streak") },
+                        singleLine = true,
+                        keyboardOptions = numberKeyboard,
                     )
                 }
             },
@@ -206,7 +222,8 @@ fun WelcomeScreen(
                         onClick = {
                             val score = devScoreInput.toIntOrNull() ?: 0
                             val level = devLevelInput.toIntOrNull() ?: 1
-                            viewModel.setTestProgress(score, level)
+                            val streak = devStreakInput.toIntOrNull() ?: 0
+                            viewModel.setTestProgress(score, level, streak)
                             showDevDialog = false
                         },
                     ) {
@@ -255,6 +272,7 @@ fun WelcomeScreen(
                                 titleTapCount = 0
                                 devScoreInput = (stats?.totalScore?.toLong() ?: 0L).toString()
                                 devLevelInput = (stats?.level ?: 1).toString()
+                                devStreakInput = currentStreak.toString()
                             }
                         },
                     )
@@ -300,7 +318,7 @@ fun WelcomeScreen(
                             modifier = Modifier.size(32.dp).scale(fireScale),
                         )
                         Text(
-                            text = "${stats?.streakCount ?: 0}",
+                            text = "$currentStreak",
                             style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Black),
                             color = IndustrialOrange,
                             modifier = Modifier.padding(start = 4.dp),

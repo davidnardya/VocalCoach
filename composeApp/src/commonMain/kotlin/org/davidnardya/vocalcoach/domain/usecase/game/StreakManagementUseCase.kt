@@ -13,8 +13,8 @@ import org.davidnardya.vocalcoach.domain.models.PlayerStats
 import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 
 /**
- * Startup inactivity penalties + streak milestone bonuses (+20 every 25 streak days).
- * [processLevelUpBranch] contains the once-per-day streak increment and milestone check.
+ * Startup inactivity penalties + level-up bookkeeping.
+ * Day streak increments and +25 milestones are handled by [UpdateStreakUseCase].
  */
 class StreakManagementUseCase(
     private val repository: ScoreRepository,
@@ -44,8 +44,7 @@ class StreakManagementUseCase(
 
     /**
      * Called when a level-up occurred ([newLevel] > [oldLevel]).
-     * Applies daily streak increment (at most once per calendar day) and +20 when [streakCount] hits 25, 50, …
-     * Bonus is included in [LevelUpProcessResult.totalScore] (persist immediately via [ScoreRepository.updateStats]).
+     * Does not modify day streak; streak is updated via [UpdateStreakUseCase].
      */
     fun processLevelUpBranch(
         rolled: PlayerStats,
@@ -56,40 +55,24 @@ class StreakManagementUseCase(
     ): LevelUpProcessResult {
         require(newLevel > oldLevel)
 
-        var lastLevelUp = todayStr
+        val lastLevelUp = todayStr
         val deltaLevels = newLevel - oldLevel
         val levelsState = handleLevelUpUseCase.nextLevelsGainedState(
             rolled = rolled,
             todayStr = todayStr,
             deltaLevels = deltaLevels,
         )
-        var levelsToday = levelsState.levelsGainedToday
+        val levelsToday = levelsState.levelsGainedToday
         val levelsDay = levelsState.levelsGainedForDate
 
-        var streak = rolled.streakCount
-        var lastStreakInc = rolled.lastStreakIncrementDate
-        var total = totalScoreAfterGrowl
-        var milestone: MilestoneBonus? = null
-
-        val streakIncToday = lastStreakInc == todayStr
-        val allowStreakIncrement = !streakIncToday || (isDebugStreakTest && streak == 24)
-        if (allowStreakIncrement) {
-            streak += 1
-            lastStreakInc = todayStr
-            if (streak > 0 && streak % 25 == 0) {
-                total += 20.0
-                milestone = MilestoneBonus(streakCount = streak, bonusPoints = 20L)
-            }
-        }
-
         return LevelUpProcessResult(
-            totalScore = total,
-            streakCount = streak,
+            totalScore = totalScoreAfterGrowl,
+            currentStreak = rolled.currentStreak,
             lastLevelUpDate = lastLevelUp,
-            lastStreakIncrementDate = lastStreakInc,
+            lastStreakIncrementDate = rolled.lastStreakIncrementDate,
             levelsGainedToday = levelsToday,
             levelsGainedForDate = levelsDay,
-            milestoneBonus = milestone,
+            milestoneBonus = null,
         )
     }
 
@@ -117,7 +100,7 @@ class StreakManagementUseCase(
             val penalty = 5.0 * penaltyDays
             val newScore = (rolled.totalScore - penalty).coerceAtLeast(0.0)
             val streakReset = newScore < 5.0
-            val newStreak = if (streakReset) 0 else rolled.streakCount
+            val newStreak = if (streakReset) 0 else rolled.currentStreak
 
             result = PenaltyResult.Applied(
                 pointsDeducted = penalty.toLong(),
@@ -128,7 +111,11 @@ class StreakManagementUseCase(
                 },
             )
 
-            rolled.copy(totalScore = newScore, streakCount = newStreak)
+            rolled.copy(
+                totalScore = newScore,
+                currentStreak = newStreak,
+                lastCompletionTimestamp = if (streakReset) null else rolled.lastCompletionTimestamp,
+            )
         }
         result
     }
@@ -136,7 +123,7 @@ class StreakManagementUseCase(
 
 data class LevelUpProcessResult(
     val totalScore: Double,
-    val streakCount: Int,
+    val currentStreak: Int,
     val lastLevelUpDate: String?,
     val lastStreakIncrementDate: String?,
     val levelsGainedToday: Int,

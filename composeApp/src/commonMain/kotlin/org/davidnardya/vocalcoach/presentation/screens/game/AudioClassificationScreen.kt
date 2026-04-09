@@ -66,8 +66,18 @@ import org.davidnardya.vocalcoach.core.util.PlatformBackHandler
 import org.davidnardya.vocalcoach.core.util.rememberMicrophonePermissionState
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import vocalcoach.composeapp.generated.resources.Res
+import kotlin.math.floor
+import kotlin.math.round
 
 private const val MODEL_RESOURCE_PATH = "files/soundclassifier_with_metadata.tflite"
+
+/** One decimal when needed (e.g. 0.5); whole scores without a trailing ".0". */
+private fun formatScoreForDisplay(value: Double): String {
+    val r = round(value * 10.0) / 10.0
+    val whole = floor(r).toLong()
+    val frac = round((r - whole) * 10.0).toInt()
+    return if (frac == 0) whole.toString() else "$whole.$frac"
+}
 
 private val ElectricOrange = Color(0xFFFF8F00)
 private val BloodRed = Color(0xFFB22222)
@@ -251,7 +261,7 @@ private fun AudioClassificationScreen(
                             )
                         }
                         Text(
-                            text = ui.totalScore.toInt().toString(),
+                            text = formatScoreForDisplay(ui.totalScore),
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontSize = 80.sp,
                                 fontWeight = FontWeight.Black,
@@ -297,7 +307,7 @@ private fun AudioClassificationScreen(
                                 .padding(horizontal = 12.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "STREAK x${ui.scoreMultiplier}",
+                                text = "NEXT +${formatScoreForDisplay(ui.scoreMultiplier)}",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Black,
                                     color = Color.White,
@@ -343,10 +353,10 @@ private fun AudioClassificationScreen(
                     }
                     
                     Text(
-                        text = "Combo ${ui.stageCombo}",
+                        text = "Hot streak ${ui.currentHotStreak}",
                         style = MaterialTheme.typography.headlineSmall.copy(
                             fontWeight = FontWeight.Black,
-                            color = if (ui.stageCombo >= 6) IndustrialOrange else MaterialTheme.colorScheme.primary
+                            color = if (ui.currentHotStreak >= 6) IndustrialOrange else MaterialTheme.colorScheme.primary
                         ),
                         modifier = Modifier.padding(top = 8.dp)
                     )

@@ -5,7 +5,13 @@ import kotlin.math.floor
 
 data class PlayerStats(
     val totalScore: Double, // Changed to Double to handle fractional points (0.5)
-    val streakCount: Int,
+    /** Consecutive calendar days with a completed session (timestamp-based rules). */
+    val currentStreak: Int,
+    /**
+     * Epoch milliseconds of last session completion instant (system clock).
+     * Used with [currentStreak] for midnight / gap detection.
+     */
+    val lastCompletionTimestamp: Long?,
     /** ISO calendar date (yyyy-MM-dd) of last level-up (used for inactivity penalty). */
     val lastLevelUpDate: String?,
     /** ISO calendar date of last time the daily streak counter was incremented (max once per day). */
@@ -33,7 +39,8 @@ data class PlayerStats(
 
         fun fromLegacyIntScore(score: Int): PlayerStats = PlayerStats(
             totalScore = score.toDouble(),
-            streakCount = 0,
+            currentStreak = 0,
+            lastCompletionTimestamp = null,
             lastLevelUpDate = null,
             lastStreakIncrementDate = null,
             levelsGainedToday = 0,

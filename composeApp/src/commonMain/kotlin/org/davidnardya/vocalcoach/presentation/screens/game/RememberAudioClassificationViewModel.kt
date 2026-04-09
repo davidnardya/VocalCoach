@@ -6,6 +6,7 @@ import org.davidnardya.vocalcoach.domain.models.TrainingStage
 import org.davidnardya.vocalcoach.di.createAudioClassificationUseCase
 import org.davidnardya.vocalcoach.di.createCalculatePointsUseCase
 import org.davidnardya.vocalcoach.di.createHandleGrowlDetectionUseCase
+import org.davidnardya.vocalcoach.di.createUpdateStreakUseCase
 import org.davidnardya.vocalcoach.di.createLevelTrackerUseCase
 import org.davidnardya.vocalcoach.di.createScoreRepository
 import org.davidnardya.vocalcoach.di.createStreakManagementUseCase
@@ -14,14 +15,16 @@ import org.davidnardya.vocalcoach.di.createStreakManagementUseCase
 fun rememberAudioClassificationViewModel(stage: TrainingStage): AudioClassificationViewModel {
     return viewModel {
         val streakManagement = createStreakManagementUseCase()
+        val updateStreakUseCase = createUpdateStreakUseCase()
         AudioClassificationViewModel(
             stage = stage,
             audioUseCase = createAudioClassificationUseCase(),
             repository = createScoreRepository(),
             levelTrackerUseCase = createLevelTrackerUseCase(),
-            handleGrowlDetectionUseCase = createHandleGrowlDetectionUseCase(streakManagement),
+            handleGrowlDetectionUseCase = createHandleGrowlDetectionUseCase(streakManagement, updateStreakUseCase),
             calculatePointsUseCase = createCalculatePointsUseCase(),
             streakManagementUseCase = streakManagement,
+            updateStreakUseCase = updateStreakUseCase,
         )
     }
 }

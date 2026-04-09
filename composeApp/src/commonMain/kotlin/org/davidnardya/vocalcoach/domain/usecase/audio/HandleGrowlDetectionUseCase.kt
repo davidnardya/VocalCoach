@@ -11,11 +11,14 @@ import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.LevelUpCelebration
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.MilestoneBonus
+import org.davidnardya.vocalcoach.domain.usecase.game.UpdateStreakUseCase
 
 class HandleGrowlDetectionUseCase(
     private val repository: ScoreRepository,
     private val calculatePointsUseCase: CalculatePointsUseCase,
     private val streakManagementUseCase: StreakManagementUseCase,
+    private val updateStreakUseCase: UpdateStreakUseCase,
 ) {
     private var lastDetectionTime: Long = 0
     private val cooldownMs = 1500L
@@ -39,41 +42,42 @@ class HandleGrowlDetectionUseCase(
         var celebration: LevelUpCelebration? = null
 
         statsUpdateMutex.withLock {
+            var streakMilestone: MilestoneBonus? = null
             repository.updateStats { raw ->
                 val rolled = PlayerStats.withDayRollover(raw, today)
-                // Note: HandleGrowlDetectionUseCase doesn't know about current session combo or selected stage.
-                // It's mostly used for general detection. For the specific "Game" mode, the ViewModel handles it.
-                // However, we should keep it compatible with Double score.
-                val points = 1.0 // Default fallback
+                val points = 1.0
 
                 var total = rolled.totalScore + points
                 val oldLevel = rolled.level
                 val newLevel = PlayerStats.levelFromTotalScore(total)
 
-                if (newLevel <= oldLevel) {
-                    return@updateStats rolled.copy(
-                        totalScore = total,
+                var next = if (newLevel <= oldLevel) {
+                    rolled.copy(totalScore = total)
+                } else {
+                    val r = streakManagementUseCase.processLevelUpBranch(
+                        rolled = rolled,
+                        oldLevel = oldLevel,
+                        newLevel = newLevel,
+                        todayStr = todayStr,
+                        totalScoreAfterGrowl = total,
+                    )
+                    celebration = LevelUpCelebration(newLevel = newLevel, milestoneBonus = r.milestoneBonus)
+                    rolled.copy(
+                        totalScore = r.totalScore,
+                        currentStreak = r.currentStreak,
+                        lastLevelUpDate = r.lastLevelUpDate,
+                        lastStreakIncrementDate = r.lastStreakIncrementDate,
+                        levelsGainedToday = r.levelsGainedToday,
+                        levelsGainedForDate = r.levelsGainedForDate,
                     )
                 }
 
-                val r = streakManagementUseCase.processLevelUpBranch(
-                    rolled = rolled,
-                    oldLevel = oldLevel,
-                    newLevel = newLevel,
-                    todayStr = todayStr,
-                    totalScoreAfterGrowl = total,
-                )
-
-                celebration = LevelUpCelebration(newLevel = newLevel, milestoneBonus = r.milestoneBonus)
-
-                rolled.copy(
-                    totalScore = r.totalScore,
-                    streakCount = r.streakCount,
-                    lastLevelUpDate = r.lastLevelUpDate,
-                    lastStreakIncrementDate = r.lastStreakIncrementDate,
-                    levelsGainedToday = r.levelsGainedToday,
-                    levelsGainedForDate = r.levelsGainedForDate,
-                )
+                val streakResult = updateStreakUseCase.applySessionCompletion(next)
+                streakMilestone = streakResult.milestoneBonus
+                streakResult.stats
+            }
+            streakMilestone?.let { bonus ->
+                streakManagementUseCase.emitMilestoneBonusForPresentation(bonus)
             }
         }
 

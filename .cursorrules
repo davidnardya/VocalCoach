@@ -1,0 +1,17 @@
+Project Guardrails:
+
+Stack: Kotlin Multiplatform (KMP), Jetpack Compose / Compose Multiplatform.
+
+Architecture: Strict Clean Architecture (Domain, Data, Presentation).
+
+Pattern: MVVM with StateFlow for UI state.
+
+Concurrency: Kotlin Coroutines & Flow.
+
+Rule 1: All business logic (e.g., streak calculation) must live in the shared module within Use Cases.
+
+Rule 2: ViewModels must expose a single UiState via StateFlow.
+
+Rule 3: Repositories must handle data mapping between DataSources and Domain Entities.
+
+Rule 4: No platform-specific code in the commonMain logic unless using expect/actual.

@@ -27,8 +27,10 @@ import org.davidnardya.vocalcoach.domain.usecase.audio.HandleGrowlDetectionUseCa
 import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.LevelUpCelebration
+import org.davidnardya.vocalcoach.domain.usecase.game.MilestoneBonus
 import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.UpdateStreakUseCase
 import kotlin.math.floor
 
 data class AudioClassificationUiState(
@@ -48,6 +50,8 @@ data class AudioClassificationUiState(
     val stagePrompt: String = "Make any growl",
     val stageFeedback: String? = null,
     val stageCombo: Int = 0,
+    /** Session hot streak (consecutive successes); same source as [stageCombo]. */
+    val currentHotStreak: Int = 0,
     /** Active level-up overlay; cleared after celebration duration. */
     val levelUpCelebration: LevelUpCelebration? = null,
     /** True when [levelUpCelebration] includes a streak milestone (+20 at 25, 50, …). */
@@ -62,6 +66,7 @@ class AudioClassificationViewModel(
     private val handleGrowlDetectionUseCase: HandleGrowlDetectionUseCase,
     private val calculatePointsUseCase: CalculatePointsUseCase,
     private val streakManagementUseCase: StreakManagementUseCase,
+    private val updateStreakUseCase: UpdateStreakUseCase,
 ) : ViewModel() {
 
     private val _internalState = MutableStateFlow(
@@ -100,14 +105,19 @@ class AudioClassificationViewModel(
         }
     }
 
-    /** Current score multiplier based on current combo and stage status. */
+    /** Points awarded for the next successful hit (tiered by stage role and session streak). */
     val multiplier: StateFlow<Double> = combine(
         repository.getPlayerStats(),
-        _internalState.map { it.stageCombo }
-    ) { stats, combo ->
+        _internalState.map { it.stageCombo },
+    ) { stats, sessionStreakBeforeNextHit ->
         val progression = resolveStageProgression(stats.level, null)
-        val isPrevious = stage.ordinal < progression.maxUnlockedStage.ordinal
-        calculatePointsUseCase.getCurrentMultiplier(combo, isPrevious)
+        val activeStage = stage.ordinal + 1
+        val maxUnlockedStage = progression.maxUnlockedStage.ordinal + 1
+        calculatePointsUseCase.previewPointsForNextHit(
+            activeStage = activeStage,
+            maxUnlockedStage = maxUnlockedStage,
+            sessionStreakBeforeHit = sessionStreakBeforeNextHit,
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -131,7 +141,7 @@ class AudioClassificationViewModel(
             totalScore = stats.totalScore,
             currentLevel = stats.level,
             levelsGainedToday = stats.levelsGainedToday,
-            streakCount = stats.streakCount,
+            streakCount = stats.currentStreak,
             scoreMultiplier = mult,
             message = internal.message,
             showExitConfirmation = internal.showExitConfirmation,
@@ -142,6 +152,7 @@ class AudioClassificationViewModel(
             stagePrompt = internal.stagePrompt,
             stageFeedback = internal.stageFeedback,
             stageCombo = internal.stageCombo,
+            currentHotStreak = internal.stageCombo,
             levelUpCelebration = levelUpCelebration,
             isMilestoneLevelUp = milestone != null,
         )
@@ -264,23 +275,27 @@ class AudioClassificationViewModel(
 
         if (result.success) {
             var celebration: LevelUpCelebration? = null
+            var streakMilestone: MilestoneBonus? = null
             repository.updateStats { stats ->
                 val today = Clock.System.todayIn(TimeZone.currentSystemDefault())
                 val todayStr = today.toString()
                 val rolled = org.davidnardya.vocalcoach.domain.models.PlayerStats.withDayRollover(stats, today)
-                
+
                 val progression = resolveStageProgression(rolled.level, null)
-                val isPrevious = stage.ordinal < progression.maxUnlockedStage.ordinal
-                val points = calculatePointsUseCase.pointsForGrowl(
-                    comboBeforeHit = internal.stageCombo,
-                    isPreviousStage = isPrevious
+                val activeStage = stage.ordinal + 1
+                val maxUnlockedStage = progression.maxUnlockedStage.ordinal + 1
+                val hotStreakIncludingThisHit = internal.stageCombo + 1
+                val points = calculatePointsUseCase.pointsForHit(
+                    activeStage = activeStage,
+                    maxUnlockedStage = maxUnlockedStage,
+                    hotStreakCount = hotStreakIncludingThisHit,
                 )
-                
+
                 val total = rolled.totalScore + points
                 val oldLevel = rolled.level
                 val newLevel = org.davidnardya.vocalcoach.domain.models.PlayerStats.levelFromTotalScore(total)
-                
-                if (newLevel > oldLevel) {
+
+                val next = if (newLevel > oldLevel) {
                     val r = streakManagementUseCase.processLevelUpBranch(
                         rolled = rolled,
                         oldLevel = oldLevel,
@@ -291,7 +306,7 @@ class AudioClassificationViewModel(
                     celebration = LevelUpCelebration(newLevel = newLevel, milestoneBonus = r.milestoneBonus)
                     rolled.copy(
                         totalScore = r.totalScore,
-                        streakCount = r.streakCount,
+                        currentStreak = r.currentStreak,
                         lastLevelUpDate = r.lastLevelUpDate,
                         lastStreakIncrementDate = r.lastStreakIncrementDate,
                         levelsGainedToday = r.levelsGainedToday,
@@ -300,12 +315,19 @@ class AudioClassificationViewModel(
                 } else {
                     rolled.copy(totalScore = total)
                 }
+
+                val streakResult = updateStreakUseCase.applySessionCompletion(next)
+                streakMilestone = streakResult.milestoneBonus
+                streakResult.stats
             }
             celebration?.let { c ->
                 streakManagementUseCase.emitLevelUpCelebration(c)
                 c.milestoneBonus?.let { bonus ->
                     streakManagementUseCase.emitMilestoneBonusForPresentation(bonus)
                 }
+            }
+            streakMilestone?.let { bonus ->
+                streakManagementUseCase.emitMilestoneBonusForPresentation(bonus)
             }
         }
 

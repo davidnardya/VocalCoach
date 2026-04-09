@@ -13,6 +13,7 @@ import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.HandleLevelUpUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.UpdateStreakUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.GetNotificationSettingsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.ResetScoreUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.SaveSettingsUseCase
@@ -40,12 +41,19 @@ fun createHandleLevelUpUseCase(): HandleLevelUpUseCase = handleLevelUpUseCase
 fun createStreakManagementUseCase(): StreakManagementUseCase =
     StreakManagementUseCase(scoreRepository, handleLevelUpUseCase, isDebugStreakTest = true)
 
+fun createUpdateStreakUseCase(): UpdateStreakUseCase =
+    UpdateStreakUseCase(scoreRepository)
+
 /** Must receive the same [StreakManagementUseCase] instance as [AudioClassificationViewModel] so milestone/level-up flows reach the UI. */
-fun createHandleGrowlDetectionUseCase(streakManagement: StreakManagementUseCase): HandleGrowlDetectionUseCase =
+fun createHandleGrowlDetectionUseCase(
+    streakManagement: StreakManagementUseCase,
+    updateStreakUseCase: UpdateStreakUseCase,
+): HandleGrowlDetectionUseCase =
     HandleGrowlDetectionUseCase(
         scoreRepository,
         calculatePointsUseCase,
         streakManagement,
+        updateStreakUseCase,
     )
 
 fun createGetNotificationSettingsUseCase() = GetNotificationSettingsUseCase(notificationSettingsRepository)

@@ -16,6 +16,7 @@ import org.davidnardya.vocalcoach.domain.models.resolveStageProgression
 import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
 import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.UpdateStreakUseCase
 
 data class StageRoadmapItem(
     val stage: TrainingStage,
@@ -35,6 +36,7 @@ data class WelcomeRoadmapState(
 class WelcomeViewModel(
     private val repository: ScoreRepository,
     private val streakManagementUseCase: StreakManagementUseCase,
+    private val updateStreakUseCase: UpdateStreakUseCase,
 ) : ViewModel() {
     private val _selectedStage = MutableStateFlow<TrainingStage?>(null)
 
@@ -50,6 +52,14 @@ class WelcomeViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = null,
+        )
+
+    /** Day streak from persisted state; no date logic in the ViewModel. */
+    val currentStreak: StateFlow<Int> = updateStreakUseCase.observeCurrentStreak()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0,
         )
 
     val roadmapState: StateFlow<WelcomeRoadmapState> = combine(
@@ -119,16 +129,22 @@ class WelcomeViewModel(
         _selectedStage.value = stage
     }
 
-    fun setTestProgress(scoreInput: Int, levelInput: Int) {
+    /**
+     * Developer override: sets score (level-derived minimum applies), level, and day streak.
+     * Persists via [ScoreRepository] so UI updates immediately from [getPlayerStats] flow.
+     */
+    fun setTestProgress(scoreInput: Int, levelInput: Int, streakInput: Int) {
         val safeScore = scoreInput.coerceAtLeast(0).toDouble()
         val safeLevel = levelInput.coerceAtLeast(1)
         val minScoreFromLevel = ((safeLevel - 1) * 10).toDouble()
         val effectiveScore = maxOf(safeScore, minScoreFromLevel)
+        val safeStreak = streakInput.coerceAtLeast(0)
 
         viewModelScope.launch {
             repository.updateStats { stats ->
                 stats.copy(totalScore = effectiveScore)
             }
+            updateStreakUseCase.applyManualStreakOverride(safeStreak)
         }
     }
 }
