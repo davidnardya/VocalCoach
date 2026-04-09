@@ -3,7 +3,11 @@ package org.davidnardya.vocalcoach.presentation.screens.game
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -19,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -32,6 +37,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -73,6 +79,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -142,6 +150,7 @@ fun AudioClassificationRoute(
     val mic = rememberMicrophonePermissionState()
     val ui by viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val haptic = LocalHapticFeedback.current
 
     val shake = remember { Animatable(0f) }
 
@@ -171,6 +180,14 @@ fun AudioClassificationRoute(
             launch {
                 runScreenShake200Ms(shake)
             }
+        }
+    }
+
+    // Trigger feedback exactly when mic becomes live (after pre-roll delay).
+    LaunchedEffect(ui.micLive) {
+        if (ui.micLive) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            playRecordingArmCue()
         }
     }
 
@@ -222,6 +239,8 @@ fun AudioClassificationRoute(
                     onBack()
                 }
             },
+            onViewAnalysis = { viewModel.onViewAnalysisClicked() },
+            onDismissAnalysisDialog = { viewModel.onDismissAnalysisDialog() },
         )
 
         val celebration = ui.levelUpCelebration
@@ -255,6 +274,8 @@ fun GameScreen(
     onStartStop: () -> Unit,
     onRecordingPressChanged: (pressed: Boolean) -> Unit,
     onBack: () -> Unit,
+    onViewAnalysis: () -> Unit,
+    onDismissAnalysisDialog: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -299,9 +320,15 @@ fun GameScreen(
                     .padding(top = 8.dp, bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                GameScoreHeader(ui = ui)
+                if (ui.showAnalysisDialog) {
+                    VocalAnalysisDialog(
+                        ui = ui,
+                        onDismiss = onDismissAnalysisDialog,
+                    )
+                }
                 when (ui.validationMode) {
                     ValidationMode.REAL_TIME -> {
+                        GameScoreHeader(ui = ui)
                         PinnedRealTimeLiveSection(ui = ui)
                         Column(
                             modifier = Modifier
@@ -324,8 +351,92 @@ fun GameScreen(
                             onRequestMic = onRequestMic,
                             onStartStop = onStartStop,
                             onRecordingPressChanged = onRecordingPressChanged,
+                            onViewAnalysis = onViewAnalysis,
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VocalAnalysisDialog(
+    ui: AudioClassificationUiState,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnClickOutside = true),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF121417),
+            border = BorderStroke(1.dp, Color(0xFF5E6673)),
+            tonalElevation = 0.dp,
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .heightIn(max = 440.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "VOCAL ANALYSIS",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                    color = Color.White,
+                )
+                Text(
+                    text = "View Analysis",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.7f),
+                )
+                StatLine(
+                    label = "technical_score",
+                    value = ui.lastAccuracyScore?.let { "${it.toInt()}%" } ?: "—",
+                )
+                StatLine(
+                    label = "technique_detected",
+                    value = ui.lastTechniqueDetected ?: "unknown",
+                )
+                if (ui.validationMode == ValidationMode.REAL_TIME && ui.top3Labels.isNotEmpty()) {
+                    Text(
+                        text = "Raw model probabilities",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White.copy(alpha = 0.9f),
+                    )
+                    ui.top3Labels.forEach { ls ->
+                        Text(
+                            text = "· ${ls.label}: ${(ls.score.coerceIn(0f, 1f) * 100f).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.82f),
+                        )
+                    }
+                }
+                Text(
+                    text = "feedback",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White.copy(alpha = 0.9f),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        text = ui.lastFullFeedback ?: ui.stageFeedback ?: "No feedback yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.92f),
+                    )
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("Close")
                 }
             }
         }
@@ -435,10 +546,11 @@ private fun RecordingStageLayout(
     onRequestMic: () -> Unit,
     onStartStop: () -> Unit,
     onRecordingPressChanged: (Boolean) -> Unit,
+    onViewAnalysis: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isAnalyzing = ui.processingState == ProcessingState.ANALYZING
-    val targetText = ui.targetLyrics.ifBlank { ui.stagePrompt }
+    val targetText = ui.currentTarget.ifBlank { ui.stagePrompt }
     val feedbackScroll = rememberScrollState()
 
     LaunchedEffect(ui.stageFeedback) {
@@ -456,9 +568,20 @@ private fun RecordingStageLayout(
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        TargetLyricsCard(targetText = targetText)
+        RecordingHeaderRow(
+            stageTitle = ui.currentStage.title,
+            canViewAnalysis = ui.lastAccuracyScore != null,
+            onViewAnalysis = onViewAnalysis,
+        )
+        RecordingScoreRow(ui = ui)
+        TeleprompterCard(
+            targetText = targetText,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp),
+        )
         if (isAnalyzing) {
             TargetAnalyzingIndicator()
         }
@@ -482,13 +605,84 @@ private fun RecordingStageLayout(
                 Text("Grant Microphone Access")
             }
         } else {
+            Spacer(modifier = Modifier.weight(1f))
             RecordingActionButtonRow(
                 ui = ui,
                 onStartStop = onStartStop,
                 onRecordingPressChanged = onRecordingPressChanged,
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun RecordingHeaderRow(
+    stageTitle: String,
+    canViewAnalysis: Boolean,
+    onViewAnalysis: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stageTitle,
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
+            color = MaterialTheme.colorScheme.primary,
+        )
+        TextButton(
+            onClick = onViewAnalysis,
+            enabled = canViewAnalysis,
+        ) {
+            Icon(Icons.Filled.QueryStats, contentDescription = null)
+            Spacer(modifier = Modifier.size(4.dp))
+            Text("View Analysis")
+        }
+    }
+}
+
+@Composable
+private fun RecordingScoreRow(ui: AudioClassificationUiState) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(horizontalAlignment = Alignment.Start) {
+                Text(
+                    text = "SCORE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp,
+                )
+                Text(
+                    text = formatScoreForDisplay(ui.totalScore),
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black),
+                    color = ElectricOrange,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "HOT STREAK",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp,
+                )
+                Text(
+                    text = "${ui.currentHotStreak}",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black),
+                    color = if (ui.currentHotStreak > 0) ElectricOrange else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
     }
 }
 
@@ -516,6 +710,16 @@ private fun TargetAnalyzingIndicator() {
 @Composable
 private fun RecordingPrepAndMicStatus(ui: AudioClassificationUiState) {
     val preparing = ui.processingState == ProcessingState.PREPARING
+    val recPulse = rememberInfiniteTransition(label = "recPulse")
+    val recAlpha by recPulse.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 520, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "recAlpha",
+    )
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -523,7 +727,7 @@ private fun RecordingPrepAndMicStatus(ui: AudioClassificationUiState) {
     ) {
         if (preparing) {
             Text(
-                text = "GET READY…",
+                text = "READY...",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
                 color = Gold,
             )
@@ -534,53 +738,97 @@ private fun RecordingPrepAndMicStatus(ui: AudioClassificationUiState) {
                 color = BloodRed.copy(alpha = 0.18f),
                 border = BorderStroke(1.dp, BloodRed.copy(alpha = 0.6f)),
             ) {
-                Text(
-                    text = "MIC ON",
+                Row(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
-                    color = BloodRed,
-                    letterSpacing = 2.sp,
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(BloodRed.copy(alpha = recAlpha), shape = RoundedCornerShape(99.dp)),
+                    )
+                    Text(
+                        text = "REC",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black),
+                        color = BloodRed.copy(alpha = recAlpha),
+                        letterSpacing = 2.sp,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TargetLyricsCard(
+private fun TeleprompterCard(
     targetText: String,
     modifier: Modifier = Modifier,
 ) {
+    val steel = Color(0xFF8C96A3)
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primary,
-        tonalElevation = 2.dp,
-        shadowElevation = 3.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.35f)),
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Black.copy(alpha = 0.40f),
+        tonalElevation = 0.dp,
+        shadowElevation = 2.dp,
+        border = BorderStroke(1.dp, steel.copy(alpha = 0.8f)),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
         ) {
             Text(
-                text = "YOUR TARGET",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
-                letterSpacing = 2.sp,
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = targetText,
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    lineHeight = 32.sp,
+                text = "TARGET LYRICS",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = Color.White.copy(alpha = 0.92f),
                 ),
-                textAlign = TextAlign.Center,
+                modifier = Modifier.align(Alignment.TopStart),
+            )
+            TeleprompterText(
+                text = targetText,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth(),
             )
         }
     }
+}
+
+@Composable
+private fun TeleprompterText(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val minFontSize = 14.sp
+    var fontSize by remember(text) { mutableStateOf(32.sp) }
+
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.displaySmall.copy(
+            fontWeight = FontWeight.Black,
+            color = color,
+            lineHeight = (fontSize.value * 1.15f).sp,
+            letterSpacing = 0.5.sp,
+        ),
+        fontSize = fontSize,
+        maxLines = 4,
+        textAlign = TextAlign.Center,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && fontSize > minFontSize) {
+                val next = (fontSize.value - 2f).coerceAtLeast(minFontSize.value)
+                if (next < fontSize.value) {
+                    fontSize = next.sp
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -589,7 +837,6 @@ private fun RecordingActionButtonRow(
     onStartStop: () -> Unit,
     onRecordingPressChanged: (Boolean) -> Unit,
 ) {
-    val haptic = LocalHapticFeedback.current
     val analyzing = ui.processingState == ProcessingState.ANALYZING
     val preparing = ui.processingState == ProcessingState.PREPARING
     val micLive = ui.micLive
@@ -597,10 +844,6 @@ private fun RecordingActionButtonRow(
     val holdPressed by holdInteraction.collectIsPressedAsState()
 
     LaunchedEffect(holdPressed) {
-        if (holdPressed && !analyzing) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            playRecordingArmCue()
-        }
         onRecordingPressChanged(holdPressed)
     }
 
@@ -669,14 +912,6 @@ private fun RecordingActionButtonRow(
         val tapBorder = if (preparing) Gold else MaterialTheme.colorScheme.primary
         OutlinedButton(
             onClick = {
-                if (
-                    ui.processingState == ProcessingState.IDLE &&
-                    !micLive &&
-                    !analyzing
-                ) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    playRecordingArmCue()
-                }
                 onStartStop()
             },
             enabled = !analyzing,

@@ -24,7 +24,7 @@ post_install do |installer|
         '\\1 "${PODS_CONFIGURATION_BUILD_DIR}"'
       )
     end
-    # TensorFlowLiteTaskAudio 0.4.3 has no arm64 slice for Apple Silicon simulator (device arm64 only).
+    # TensorFlowLiteTaskAudio remains linked for device builds only (iphoneos).
     # Link it for device only; simulator uses a stub classifier in Kotlin (see composeApp iosSimulatorArm64Main).
     unless text.include?('OTHER_LDFLAGS[sdk=iphoneos*]')
       text = text.sub(

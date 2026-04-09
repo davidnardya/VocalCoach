@@ -49,12 +49,12 @@ class AiVocalValidator(
     /**
      * @param audioBytes Raw audio bytes (e.g. WAV) matching [mimeType]
      * @param mimeType e.g. `audio/wav`, `audio/mp4`, `audio/mpeg`
-     * @param targetLyrics Lyric line the user is attempting
+     * @param currentTarget lyric/phrase currently displayed to the player
      */
     suspend fun validateVerse(
         audioBytes: ByteArray,
         mimeType: String,
-        targetLyrics: String,
+        currentTarget: String,
     ): Result<AiVerseValidationResult> {
         if (DeveloperDebugSettings.mockGeminiSuccess.value) {
             return Result.success(
@@ -71,7 +71,7 @@ class AiVocalValidator(
             return Result.failure(IllegalStateException("No audio captured."))
         }
 
-        val prompt = legacyVersePrompt(targetLyrics)
+        val prompt = legacyVersePrompt(currentTarget)
 
         val base64Audio = audioBytes.encodeBase64()
 
@@ -137,7 +137,7 @@ class AiVocalValidator(
     suspend fun analyzeVocal(
         filePath: String,
         mimeType: String,
-        targetLyrics: String,
+        currentTarget: String,
     ): Result<AiVocalAnalysisResult> {
         if (DeveloperDebugSettings.mockGeminiSuccess.value) {
             return Result.success(
@@ -156,15 +156,15 @@ class AiVocalValidator(
         if (bytes.isEmpty()) {
             return Result.failure(IllegalStateException("No audio captured."))
         }
-        return analyzeVocalFromBytes(bytes, mimeType, targetLyrics)
+        return analyzeVocalFromBytes(bytes, mimeType, currentTarget)
     }
 
     private suspend fun analyzeVocalFromBytes(
         audioBytes: ByteArray,
         mimeType: String,
-        targetLyrics: String,
+        currentTarget: String,
     ): Result<AiVocalAnalysisResult> = try {
-        val prompt = growlAnalysisPrompt(targetLyrics)
+        val prompt = growlAnalysisPrompt(currentTarget)
 
         val base64Audio = audioBytes.encodeBase64()
         val body = buildJsonObject {
@@ -257,12 +257,12 @@ class AiVocalValidator(
         else -> value.coerceIn(0.0, 1.0)
     }
 
-    private fun growlAnalysisPrompt(targetLyrics: String) = """
+    private fun growlAnalysisPrompt(currentTarget: String) = """
         You are a Metal Vocal Validator. Listen to the audio.
 
         Validation Criteria:
         - TECHNIQUE: Is the user using an extreme vocal technique? (Acceptable: Growl, Guttural, Scream, Screech, Shout, False Cord, Fry). If any distortion is present, pass the technique check.
-        - LYRICS: Did the user pronounce the target words: $targetLyrics? Accept approximate pronunciation. Do not penalize for slurring or lack of clarity common in metal.
+        - LYRICS: Did the user pronounce the target words: $currentTarget? Accept approximate pronunciation. Do not penalize for slurring or lack of clarity common in metal.
         - QUALITY: Ignore volume, consistency, and 'brutality.'
 
         Set is_successful to true only if distortion is detected AND the target words are roughly recognizable.
@@ -275,8 +275,8 @@ class AiVocalValidator(
         }
     """.trimIndent()
 
-    private fun legacyVersePrompt(targetLyrics: String) =
-        "I am a metal vocal coach. Listen to this audio. The user is attempting to growl the following lyrics: $targetLyrics. " +
+    private fun legacyVersePrompt(currentTarget: String) =
+        "I am a metal vocal coach. Listen to this audio. The user is attempting to growl the following lyrics: $currentTarget. " +
             "On a scale of 1-10, how accurate is their pronunciation and timing? " +
             "Return a JSON object with 'score' and 'feedback'."
 

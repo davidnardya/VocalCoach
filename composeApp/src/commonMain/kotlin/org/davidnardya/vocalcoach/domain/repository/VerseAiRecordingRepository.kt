@@ -11,5 +11,5 @@ interface VerseAiRecordingRepository {
 
     fun startRecording()
 
-    suspend fun stopRecordingAndValidate(targetLyrics: String): Result<AiVerseValidationResult>
+    suspend fun stopRecordingAndValidate(currentTarget: String): Result<AiVerseValidationResult>
 }

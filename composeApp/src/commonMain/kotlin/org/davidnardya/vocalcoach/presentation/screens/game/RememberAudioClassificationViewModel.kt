@@ -7,6 +7,7 @@ import org.davidnardya.vocalcoach.di.createAiVocalValidator
 import org.davidnardya.vocalcoach.di.createAudioClassificationUseCase
 import org.davidnardya.vocalcoach.di.createCalculatePointsUseCase
 import org.davidnardya.vocalcoach.di.createFileAudioRecorder
+import org.davidnardya.vocalcoach.di.createGetNextTargetUseCase
 import org.davidnardya.vocalcoach.di.createUpdateStreakUseCase
 import org.davidnardya.vocalcoach.di.createLevelTrackerUseCase
 import org.davidnardya.vocalcoach.di.createScoreRepository
@@ -25,6 +26,7 @@ fun rememberAudioClassificationViewModel(stage: TrainingStage): AudioClassificat
             calculatePointsUseCase = createCalculatePointsUseCase(),
             streakManagementUseCase = streakManagement,
             updateStreakUseCase = updateStreakUseCase,
+            getNextTargetUseCase = createGetNextTargetUseCase(),
             fileAudioRecorder = createFileAudioRecorder(),
             aiVocalValidator = if (stage.ordinal >= TrainingStage.Stage3.ordinal) {
                 createAiVocalValidator()

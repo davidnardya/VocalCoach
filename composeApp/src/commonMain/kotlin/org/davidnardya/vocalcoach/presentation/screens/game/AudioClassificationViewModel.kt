@@ -30,6 +30,7 @@ import org.davidnardya.vocalcoach.domain.repository.ScoreRepository
 import org.davidnardya.vocalcoach.domain.usecase.audio.AudioClassificationUseCase
 import org.davidnardya.vocalcoach.domain.usecase.audio.LevelTrackerUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.CalculatePointsUseCase
+import org.davidnardya.vocalcoach.domain.usecase.game.GetNextTargetUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.LevelUpCelebration
 import org.davidnardya.vocalcoach.domain.usecase.game.MilestoneBonus
 import org.davidnardya.vocalcoach.domain.usecase.game.PenaltyResult
@@ -37,7 +38,7 @@ import org.davidnardya.vocalcoach.domain.usecase.game.StreakManagementUseCase
 import org.davidnardya.vocalcoach.domain.usecase.game.UpdateStreakUseCase
 import kotlin.math.floor
 
-private const val RECORDING_ARM_DELAY_MS = 500L
+private const val RECORDING_ARM_DELAY_MS = 400L
 
 /** How the current route validates attempts: Teachable Machine stream vs file + Gemini. */
 enum class ValidationMode {
@@ -56,27 +57,6 @@ enum class ProcessingState {
     ERROR,
 }
 
-/** Stage 5 verse lines (must match recording targets for Stage 5). */
-private val STAGE5_VERSE_TARGETS: List<Pair<String, Char>> = listOf(
-    "WE RISE / WE ROAR" to 'A',
-    "COLD BLOOD / COLD IRON" to 'O',
-    "STEEL NERVES / STEEL VEINS" to 'E',
-    "SPIRIT / FURY / SPIRIT" to 'I',
-    "TRUTH / BRUTE / TRUTH" to 'U',
-)
-
-private val STAGE3_WORD_TARGETS: List<Pair<String, Char>> = listOf(
-    "RAGE" to 'A', "VOID" to 'O', "STEEL" to 'E', "RIFT" to 'I', "BRUTE" to 'U',
-)
-
-private val STAGE4_SENTENCE_TARGETS: List<Pair<String, Char>> = listOf(
-    "BURN THE NIGHT" to 'A',
-    "HOLD THE STORM" to 'O',
-    "BREAK THE SPELL" to 'E',
-    "RIDE THE RIFT" to 'I',
-    "CRUSH THE TRUTH" to 'U',
-)
-
 data class AudioClassificationUiState(
     val validationMode: ValidationMode = ValidationMode.REAL_TIME,
     val processingState: ProcessingState = ProcessingState.IDLE,
@@ -94,14 +74,20 @@ data class AudioClassificationUiState(
     val currentStage: TrainingStage = TrainingStage.Stage1,
     val maxUnlockedStage: TrainingStage = TrainingStage.Stage1,
     val stagePrompt: String = "Make any growl",
-    /** Plain target line for Gemini (recording stages); empty in real-time stages. */
-    val targetLyrics: String = "",
+    /** Current plain-text target for recording stages; empty in real-time stages. */
+    val currentTarget: String = "",
     val stageFeedback: String? = null,
     val stageCombo: Int = 0,
     /** Session hot streak (consecutive successes); same source as [stageCombo]. */
     val currentHotStreak: Int = 0,
     /** Last Gemini accuracy (0–100) after a recording-mode analysis. */
     val lastAccuracyScore: Double? = null,
+    /** Last detected extreme-vocal technique from Gemini analysis. */
+    val lastTechniqueDetected: String? = null,
+    /** Full Gemini feedback text from the latest recording analysis. */
+    val lastFullFeedback: String? = null,
+    /** Controls "Vocal Analysis" dialog visibility. */
+    val showAnalysisDialog: Boolean = false,
     /** Active level-up overlay; cleared after celebration duration. */
     val levelUpCelebration: LevelUpCelebration? = null,
     /** True when [levelUpCelebration] includes a streak milestone (+20 at 25, 50, …). */
@@ -121,6 +107,7 @@ class AudioClassificationViewModel(
     private val calculatePointsUseCase: CalculatePointsUseCase,
     private val streakManagementUseCase: StreakManagementUseCase,
     private val updateStreakUseCase: UpdateStreakUseCase,
+    private val getNextTargetUseCase: GetNextTargetUseCase,
     private val fileAudioRecorder: AudioRecorder,
     private val aiVocalValidator: AiVocalValidator?,
 ) : ViewModel() {
@@ -165,6 +152,12 @@ class AudioClassificationViewModel(
                     delay(2500)
                     _levelUpCelebration.value = null
                 }
+            }
+        }
+
+        if (validationMode == ValidationMode.RECORDING) {
+            viewModelScope.launch {
+                prepareNextRecordingTarget()
             }
         }
     }
@@ -219,11 +212,7 @@ class AudioClassificationViewModel(
                     internal.processingState == ProcessingState.RECORDING ||
                     internal.processingState == ProcessingState.PREPARING
         }
-        val targetLyrics = if (validationMode == ValidationMode.RECORDING) {
-            recordingTargetPhrase(stage, internal.stageCombo)
-        } else {
-            ""
-        }
+        val currentTarget = if (validationMode == ValidationMode.RECORDING) internal.currentTarget else ""
         AudioClassificationUiState(
             validationMode = validationMode,
             processingState = internal.processingState,
@@ -241,11 +230,14 @@ class AudioClassificationViewModel(
             currentStage = progression.currentStage,
             maxUnlockedStage = progression.maxUnlockedStage,
             stagePrompt = internal.stagePrompt,
-            targetLyrics = targetLyrics,
+            currentTarget = currentTarget,
             stageFeedback = internal.stageFeedback,
             stageCombo = internal.stageCombo,
             currentHotStreak = internal.stageCombo,
             lastAccuracyScore = internal.lastAccuracyScore,
+            lastTechniqueDetected = internal.lastTechniqueDetected,
+            lastFullFeedback = internal.lastFullFeedback,
+            showAnalysisDialog = internal.showAnalysisDialog,
             levelUpCelebration = levelUpCelebration,
             isMilestoneLevelUp = milestone != null,
             micLive = fileIsRecording,
@@ -261,6 +253,18 @@ class AudioClassificationViewModel(
     private val scoringCooldownMs = 1200L
 
     private var recordingPrepJob: Job? = null
+
+    private suspend fun prepareNextRecordingTarget() {
+        if (validationMode != ValidationMode.RECORDING) return
+        val nextTarget = getNextTargetUseCase(stage)
+        if (nextTarget.isBlank()) return
+        _internalState.update {
+            it.copy(
+                currentTarget = nextTarget,
+                stagePrompt = recordingStagePrompt(stage, nextTarget),
+            )
+        }
+    }
 
     private fun cancelRecordingPrep() {
         recordingPrepJob?.cancel()
@@ -455,8 +459,10 @@ class AudioClassificationViewModel(
             return
         }
         val internal = _internalState.value
-        val targetPhrase = recordingTargetPhrase(stage, internal.stageCombo)
-        val result = validator.analyzeVocal(path, mimeType = "audio/wav", targetLyrics = targetPhrase)
+        val targetPhrase = internal.currentTarget.ifBlank {
+            getNextTargetUseCase(stage)
+        }
+        val result = validator.analyzeVocal(path, mimeType = "audio/wav", currentTarget = targetPhrase)
         result.fold(
             onSuccess = { analysis ->
                 val techPercent = (analysis.technicalScore * 100).toInt().coerceIn(0, 100)
@@ -467,16 +473,16 @@ class AudioClassificationViewModel(
                         "${analysis.feedback} (growl technique $techPercent%)"
                     }
                 val nextCombo = if (analysis.isSuccessful) internal.stageCombo + 1 else 0
-                val nextPrompt = recordingStagePrompt(stage, nextCombo)
                 if (analysis.isSuccessful) {
                     awardPointsForSuccessfulRecordingHit(internal.stageCombo)
                 }
                 _internalState.update {
                     it.copy(
                         stageCombo = nextCombo,
-                        stagePrompt = nextPrompt,
                         stageFeedback = feedbackText,
                         lastAccuracyScore = analysis.technicalScore * 100.0,
+                        lastTechniqueDetected = analysis.techniqueDetected.takeIf { t -> t.isNotBlank() },
+                        lastFullFeedback = analysis.feedback,
                         processingState = if (analysis.isSuccessful) ProcessingState.SUCCESS else ProcessingState.IDLE,
                         message = null,
                     )
@@ -494,6 +500,9 @@ class AudioClassificationViewModel(
                         }
                     }
                 }
+                viewModelScope.launch {
+                    prepareNextRecordingTarget()
+                }
             },
             onFailure = { e ->
                 _internalState.update {
@@ -501,12 +510,25 @@ class AudioClassificationViewModel(
                         processingState = ProcessingState.ERROR,
                         stageFeedback = null,
                         lastAccuracyScore = null,
+                        lastTechniqueDetected = null,
+                        lastFullFeedback = null,
                         message = e.message?.takeIf { m -> m.isNotBlank() }
                             ?: "Could not analyze audio. Check your connection and try again.",
                     )
                 }
             },
         )
+    }
+
+    fun onViewAnalysisClicked() {
+        val state = _internalState.value
+        if (validationMode != ValidationMode.RECORDING) return
+        if (state.lastAccuracyScore == null) return
+        _internalState.update { it.copy(showAnalysisDialog = true) }
+    }
+
+    fun onDismissAnalysisDialog() {
+        _internalState.update { it.copy(showAnalysisDialog = false) }
     }
 
     private suspend fun awardPointsForSuccessfulRecordingHit(sessionStreakBeforeHit: Int) {
@@ -636,6 +658,7 @@ class AudioClassificationViewModel(
     private data class InternalState(
         val isRecording: Boolean,
         val currentLabel: String,
+        val currentTarget: String = "",
         val processingState: ProcessingState = ProcessingState.IDLE,
         val message: String? = null,
         val showExitConfirmation: Boolean = false,
@@ -645,6 +668,9 @@ class AudioClassificationViewModel(
         val stageFeedback: String? = null,
         val stageCombo: Int = 0,
         val lastAccuracyScore: Double? = null,
+        val lastTechniqueDetected: String? = null,
+        val lastFullFeedback: String? = null,
+        val showAnalysisDialog: Boolean = false,
     )
 
     private suspend fun maybeScoreRealTimeAttempt(label: String, score: Float) {
@@ -773,74 +799,30 @@ private fun evaluateStage(
                 feedback = if (success) "Correct vowel!" else "Missed target vowel",
             )
         }
-        TrainingStage.Stage3 -> evaluatePhraseStage(
-            combo = combo,
-            growlDetected = growlDetected,
-            vowel = vowel,
-            targets = STAGE3_WORD_TARGETS,
-            label = "word",
-        )
-        TrainingStage.Stage4 -> evaluatePhraseStage(
-            combo = combo,
-            growlDetected = growlDetected,
-            vowel = vowel,
-            targets = STAGE4_SENTENCE_TARGETS,
-            label = "sentence",
-        )
-        TrainingStage.Stage5 -> evaluatePhraseStage(
-            combo = combo,
-            growlDetected = growlDetected,
-            vowel = vowel,
-            targets = STAGE5_VERSE_TARGETS,
-            label = "verse",
+        // Stages 3–5 use recording + Gemini flow, not real-time label matching.
+        TrainingStage.Stage3,
+        TrainingStage.Stage4,
+        TrainingStage.Stage5,
+        -> StageEvalResult(
+            shouldCountAttempt = false,
+            success = false,
+            nextPrompt = stagePromptFor(stage, combo),
+            feedback = "",
         )
     }
 }
 
-private fun recordingTargets(stage: TrainingStage): List<Pair<String, Char>> = when (stage) {
-    TrainingStage.Stage3 -> STAGE3_WORD_TARGETS
-    TrainingStage.Stage4 -> STAGE4_SENTENCE_TARGETS
-    TrainingStage.Stage5 -> STAGE5_VERSE_TARGETS
-    else -> emptyList()
-}
-
-private fun recordingTargetPhrase(stage: TrainingStage, combo: Int): String {
-    val targets = recordingTargets(stage)
-    if (targets.isEmpty()) return ""
-    return targets[combo % targets.size].first
-}
-
-private fun recordingStagePrompt(stage: TrainingStage, combo: Int): String {
-    val targets = recordingTargets(stage)
-    if (targets.isEmpty()) return stagePromptFor(stage, combo)
+private fun recordingStagePrompt(stage: TrainingStage, target: String): String {
+    if (target.isBlank()) return stagePromptFor(stage, 0)
     val label = when (stage) {
         TrainingStage.Stage3 -> "word"
         TrainingStage.Stage4 -> "sentence"
         TrainingStage.Stage5 -> "verse"
         else -> "phrase"
     }
-    val current = targets[combo % targets.size]
-    return "Target $label: ${current.first}"
+    return "Target $label: $target"
 }
 
-private fun evaluatePhraseStage(
-    combo: Int,
-    growlDetected: Boolean,
-    vowel: Char?,
-    targets: List<Pair<String, Char>>,
-    label: String,
-): StageEvalResult {
-    val current = targets[combo % targets.size]
-    val success = growlDetected && vowel == current.second
-    val nextCombo = if (success) combo + 1 else 0
-    val nextTarget = targets[nextCombo % targets.size]
-    return StageEvalResult(
-        shouldCountAttempt = growlDetected,
-        success = success,
-        nextPrompt = "Target $label: ${nextTarget.first}",
-        feedback = if (success) "Matched target!" else "Missed target $label",
-    )
-}
 
 private enum class ModelLabelType {
     Background,
@@ -884,9 +866,9 @@ private fun nextTargetVowel(combo: Int): Char {
 private fun stagePromptFor(stage: TrainingStage, combo: Int): String = when (stage) {
     TrainingStage.Stage1 -> "Make any growl"
     TrainingStage.Stage2 -> "Target vowel: ${nextTargetVowel(combo).uppercaseChar()}"
-    TrainingStage.Stage3 -> recordingStagePrompt(TrainingStage.Stage3, combo)
-    TrainingStage.Stage4 -> recordingStagePrompt(TrainingStage.Stage4, combo)
-    TrainingStage.Stage5 -> recordingStagePrompt(TrainingStage.Stage5, combo)
+    TrainingStage.Stage3 -> "Target word: Ready"
+    TrainingStage.Stage4 -> "Target sentence: Ready"
+    TrainingStage.Stage5 -> "Target verse: Ready"
 }
 
 private fun Float.safeUnitFloat(): Float {

@@ -18,13 +18,13 @@ class VerseAiRecordingRepositoryImpl(
         recorder.startRecording()
     }
 
-    override suspend fun stopRecordingAndValidate(targetLyrics: String): Result<AiVerseValidationResult> {
+    override suspend fun stopRecordingAndValidate(currentTarget: String): Result<AiVerseValidationResult> {
         val path = recorder.stopRecording()
             ?: return Result.failure(IllegalStateException("No recording file."))
         val bytes = readRecordedAudioBytes(path)
         if (bytes.isEmpty()) {
             return Result.failure(IllegalStateException("Empty audio file."))
         }
-        return validator.validateVerse(bytes, recordedMimeType, targetLyrics)
+        return validator.validateVerse(bytes, recordedMimeType, currentTarget)
     }
 }
