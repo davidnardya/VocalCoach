@@ -99,7 +99,7 @@ fun createHandleGrowlDetectionUseCase(
     )
 
 fun createGetNotificationSettingsUseCase() = GetNotificationSettingsUseCase(notificationSettingsRepository)
-fun createSaveSettingsUseCase() = SaveSettingsUseCase(notificationSettingsRepository, createNotificationScheduler())
+fun createSaveSettingsUseCase() = SaveSettingsUseCase(notificationSettingsRepository)
 fun createNotificationSettingsRepository() = notificationSettingsRepository
 
 fun createResetScoreUseCase() = ResetScoreUseCase(scoreRepository)

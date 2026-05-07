@@ -77,7 +77,8 @@ fun App() {
                     SettingsViewModel(
                         createGetNotificationSettingsUseCase(),
                         createSaveSettingsUseCase(),
-                        createResetScoreUseCase()
+                        createResetScoreUseCase(),
+                        createNotificationScheduler()
                     )
                 }
                 SettingsScreen(

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.davidnardya.vocalcoach.domain.models.NotificationSettings
+import org.davidnardya.vocalcoach.domain.repository.NotificationScheduler
 import org.davidnardya.vocalcoach.domain.usecase.settings.GetNotificationSettingsUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.ResetScoreUseCase
 import org.davidnardya.vocalcoach.domain.usecase.settings.SaveSettingsUseCase
@@ -12,7 +13,8 @@ import org.davidnardya.vocalcoach.domain.usecase.settings.SaveSettingsUseCase
 class SettingsViewModel(
     private val getSettingsUseCase: GetNotificationSettingsUseCase,
     private val saveSettingsUseCase: SaveSettingsUseCase,
-    private val resetScoreUseCase: ResetScoreUseCase
+    private val resetScoreUseCase: ResetScoreUseCase,
+    private val notificationScheduler: NotificationScheduler
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(NotificationSettings())
@@ -56,6 +58,15 @@ class SettingsViewModel(
         viewModelScope.launch {
             saveSettingsUseCase(_draftState.value)
             _state.value = _draftState.value
+            if (_draftState.value.enabled) {
+                notificationScheduler.scheduleReminder(
+                    intervalHours = _draftState.value.intervalHours.toInt(),
+                    targetHour = _draftState.value.hour,
+                    targetMinute = _draftState.value.minute
+                )
+            } else {
+                notificationScheduler.scheduleReminder(0, _draftState.value.hour, _draftState.value.minute)
+            }
             _events.emit(SettingsEvent.ShowSnackbar("Settings saved"))
         }
     }
@@ -64,6 +75,19 @@ class SettingsViewModel(
         viewModelScope.launch {
             resetScoreUseCase()
             _events.emit(SettingsEvent.ShowSnackbar("Progress reset successfully"))
+        }
+    }
+
+    fun onSendTestReminderClicked(hasNotificationPermission: Boolean) {
+        if (!hasNotificationPermission) {
+            viewModelScope.launch {
+                _events.emit(SettingsEvent.ShowPermissionExplanation)
+            }
+            return
+        }
+        notificationScheduler.triggerImmediateReminder()
+        viewModelScope.launch {
+            _events.emit(SettingsEvent.ShowSnackbar("Test reminder queued"))
         }
     }
 }

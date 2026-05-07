@@ -29,6 +29,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var showTimePicker by remember { mutableStateOf(false) }
     var showPermissionRequest by remember { mutableStateOf(false) }
+    var permissionRequestForTestReminder by remember { mutableStateOf(false) }
     var showResetConfirmation by remember { mutableStateOf(false) }
     var showPermissionExplanation by remember { mutableStateOf(false) }
 
@@ -48,7 +49,13 @@ fun SettingsScreen(
             //todo - why no use?
             showPermissionRequest = false
             scope.launch {
-                viewModel.onSaveClicked(permissionManager.hasNotificationPermission())
+                val hasPermission = permissionManager.hasNotificationPermission()
+                if (permissionRequestForTestReminder) {
+                    viewModel.onSendTestReminderClicked(hasPermission)
+                    permissionRequestForTestReminder = false
+                } else {
+                    viewModel.onSaveClicked(hasPermission)
+                }
             }
         }
     }
@@ -78,6 +85,7 @@ fun SettingsScreen(
                                 val hasPermission = permissionManager.hasNotificationPermission()
                                 if (draftState.enabled && !hasPermission) {
                                     //todo - why no use?
+                                    permissionRequestForTestReminder = false
                                     showPermissionRequest = true
                                 } else {
                                     viewModel.onSaveClicked(hasPermission)
@@ -152,6 +160,23 @@ fun SettingsScreen(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         label = { Text("Interval in hours") }
                     )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            val hasPermission = permissionManager.hasNotificationPermission()
+                            if (!hasPermission) {
+                                permissionRequestForTestReminder = true
+                                showPermissionRequest = true
+                            } else {
+                                viewModel.onSendTestReminderClicked(hasPermission)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Send Test Reminder Now")
                 }
             }
 

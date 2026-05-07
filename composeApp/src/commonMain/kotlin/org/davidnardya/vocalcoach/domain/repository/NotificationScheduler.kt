@@ -1,7 +1,6 @@
 package org.davidnardya.vocalcoach.domain.repository
 
-import org.davidnardya.vocalcoach.domain.models.NotificationSettings
-
 interface NotificationScheduler {
-    fun reschedule(settings: NotificationSettings)
+    fun scheduleReminder(intervalHours: Int, targetHour: Int, targetMinute: Int)
+    fun triggerImmediateReminder()
 }
